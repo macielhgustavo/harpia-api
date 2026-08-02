@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ForbiddenException,
   Inject,
   Injectable,
   NotFoundException,
@@ -17,12 +18,16 @@ import { CreateDocumentDto } from './dto/create-document.dto';
 import { documentDownloadPath, presentDocument } from './document-response';
 import { validateDocumentFile } from './document-file.validation';
 
-const documentInclude = {
-  person: { select: { id: true, name: true } },
-  investment: { select: { id: true, amount: true } },
-  unit: { select: { id: true, identifier: true } },
-  development: { select: { id: true, name: true } },
-} satisfies Prisma.DocumentInclude;
+function getDocumentInclude(includeFinancialData: boolean) {
+  return {
+    person: { select: { id: true, name: true } },
+    investment: includeFinancialData
+      ? { select: { id: true, amount: true } }
+      : false,
+    unit: { select: { id: true, identifier: true } },
+    development: { select: { id: true, name: true } },
+  } satisfies Prisma.DocumentInclude;
+}
 
 interface DocumentFilters {
   personId?: string;
@@ -44,8 +49,21 @@ export class DocumentsService {
     private readonly storageRegistry: StorageRegistry,
   ) {}
 
-  async findAll(organizationId: string, filters: DocumentFilters) {
-    const where: Prisma.DocumentWhereInput = { organizationId };
+  async findAll(
+    organizationId: string,
+    filters: DocumentFilters,
+    includeFinancialData = false,
+  ) {
+    if (filters.investmentId && !includeFinancialData) {
+      throw new ForbiddenException(
+        'Você não tem permissão para consultar documentos financeiros.',
+      );
+    }
+
+    const where: Prisma.DocumentWhereInput = {
+      organizationId,
+      ...(includeFinancialData ? {} : { investmentId: null }),
+    };
     if (filters.personId) where.personId = filters.personId;
     if (filters.investmentId) where.investmentId = filters.investmentId;
     if (filters.unitId) where.unitId = filters.unitId;
@@ -53,16 +71,24 @@ export class DocumentsService {
 
     const documents = await this.prisma.document.findMany({
       where,
-      include: documentInclude,
+      include: getDocumentInclude(includeFinancialData),
       orderBy: { createdAt: 'desc' },
     });
     return documents.map((document) => presentDocument(document));
   }
 
-  async findOne(id: string, organizationId: string) {
+  async findOne(
+    id: string,
+    organizationId: string,
+    includeFinancialData = false,
+  ) {
     const document = await this.prisma.document.findFirst({
-      where: { id, organizationId },
-      include: documentInclude,
+      where: {
+        id,
+        organizationId,
+        ...(includeFinancialData ? {} : { investmentId: null }),
+      },
+      include: getDocumentInclude(includeFinancialData),
     });
     if (!document) throw new NotFoundException('Documento não encontrado');
     return presentDocument(document);
@@ -72,8 +98,14 @@ export class DocumentsService {
     organizationId: string,
     dto: CreateDocumentDto,
     file: Express.Multer.File,
+    includeFinancialData = false,
   ) {
     const validatedFile = validateDocumentFile(file);
+    if (dto.investmentId && !includeFinancialData) {
+      throw new ForbiddenException(
+        'Você não tem permissão para vincular documentos a investimentos.',
+      );
+    }
     await this.assertLinksInOrg(dto, organizationId);
 
     const id = randomUUID();
@@ -104,7 +136,7 @@ export class DocumentsService {
           unitId: dto.unitId,
           developmentId: dto.developmentId,
         },
-        include: documentInclude,
+        include: getDocumentInclude(includeFinancialData),
       });
       return presentDocument(document);
     } catch (error) {
@@ -122,9 +154,14 @@ export class DocumentsService {
   async download(
     id: string,
     organizationId: string,
+    includeFinancialData = false,
   ): Promise<DocumentDownload> {
     const document = await this.prisma.document.findFirst({
-      where: { id, organizationId },
+      where: {
+        id,
+        organizationId,
+        ...(includeFinancialData ? {} : { investmentId: null }),
+      },
     });
     if (!document) throw new NotFoundException('Documento não encontrado');
 
@@ -148,9 +185,17 @@ export class DocumentsService {
     }
   }
 
-  async remove(id: string, organizationId: string) {
+  async remove(
+    id: string,
+    organizationId: string,
+    includeFinancialData = false,
+  ) {
     const document = await this.prisma.document.findFirst({
-      where: { id, organizationId },
+      where: {
+        id,
+        organizationId,
+        ...(includeFinancialData ? {} : { investmentId: null }),
+      },
     });
     if (!document) throw new NotFoundException('Documento não encontrado');
 

@@ -12,7 +12,11 @@ import { UpdateCompanyDto } from './dto/update-company.dto';
 export class CompaniesService {
   constructor(private readonly prisma: PrismaService) {}
 
-  async findAll(organizationId: string, type?: CompanyType) {
+  async findAll(
+    organizationId: string,
+    type?: CompanyType,
+    includeFinancialData = false,
+  ) {
     const where: Prisma.CompanyWhereInput = { organizationId };
     if (type) where.type = type;
 
@@ -20,16 +24,28 @@ export class CompaniesService {
       where,
       include: {
         developments: { select: { id: true, name: true, status: true } },
-        _count: { select: { developments: true, bankAccounts: true } },
+        _count: {
+          select: {
+            developments: true,
+            bankAccounts: includeFinancialData,
+          },
+        },
       },
       orderBy: { createdAt: 'desc' },
     });
   }
 
-  async findOne(id: string, organizationId: string) {
+  async findOne(
+    id: string,
+    organizationId: string,
+    includeFinancialData = false,
+  ) {
     const company = await this.prisma.company.findFirst({
       where: { id, organizationId },
-      include: { developments: true, bankAccounts: true },
+      include: {
+        developments: true,
+        bankAccounts: includeFinancialData,
+      },
     });
     if (!company) throw new NotFoundException('Empresa não encontrada');
     return company;

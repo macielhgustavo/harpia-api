@@ -34,7 +34,11 @@ export class DevelopmentsService {
     });
   }
 
-  async findOne(id: string, organizationId: string) {
+  async findOne(
+    id: string,
+    organizationId: string,
+    includeFinancialData = false,
+  ) {
     const development = await this.prisma.development.findFirst({
       where: { id, organizationId },
       include: {
@@ -42,10 +46,16 @@ export class DevelopmentsService {
         unitTypes: true,
         units: { include: { unitType: { select: { id: true, name: true } } } },
         priceTables: true,
-        _count: { select: { allocations: true, units: true } },
+        _count: {
+          select: {
+            allocations: includeFinancialData,
+            units: true,
+          },
+        },
       },
     });
-    if (!development) throw new NotFoundException('Empreendimento não encontrado');
+    if (!development)
+      throw new NotFoundException('Empreendimento não encontrado');
     return development;
   }
 
@@ -108,7 +118,7 @@ export class DevelopmentsService {
     });
     if (allocations > 0) {
       throw new ConflictException(
-        'Empreendimento possui alocações de investimento e não pode ser removido',
+        'Empreendimento possui vínculos existentes e não pode ser removido',
       );
     }
 

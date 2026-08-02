@@ -153,6 +153,50 @@ PASSWORD_RESET_TOKEN_TTL_SECONDS=1800
 PASSWORD_RESET_FRONTEND_URL=https://app.example.com/reset-password
 ```
 
+## Role-based access control
+
+Every authenticated request loads the account's current role and active state
+from the database. The role carried in the JWT is informational only; it is not
+trusted as the authorization source. Deactivating an account or changing its
+role increments `tokenVersion`, so previously issued JWTs stop working.
+
+The centralized permission matrix currently applies these profiles:
+
+| Role | Access profile |
+| --- | --- |
+| `OWNER` | Every permission, including users, future audit, financial data and exports. |
+| `ADMIN` | Every permission, but cannot change an `OWNER` or grant the `OWNER` role. |
+| `FINANCEIRO` | Operational reads plus bank-account, investment and return writes, financial dashboard and report exports. |
+| `COMERCIAL` | People writes, operational reads, document/interaction writes and the reserved CRM/sales permissions. |
+| `OPERACIONAL` | Operational reads and development, unit, price, document and interaction writes. |
+| `LEITURA` | Nonfinancial read-only access. |
+
+All existing operational controllers declare their required read permission at
+class level and override it with the matching write permission on mutations.
+Routes without authorization metadata fail closed with `403`; public routes and
+the few routes intended for any valid JWT must opt in explicitly. Current
+financial dashboard and report routes are unavailable to nonfinancial roles.
+Generic people, company, development, unit and document responses also hide indirect
+financial relationships; authorized financial callers retain the previous
+response fields.
+
+### User management endpoints
+
+All endpoints below require `USERS_MANAGE` and are tenant-scoped:
+
+| Endpoint | Behavior |
+| --- | --- |
+| `GET /users` | Lists safe account fields; accepts `role`, `isActive` and `search`. |
+| `GET /users/:id` | Returns one account from the active organization. |
+| `PATCH /users/:id/role` | Changes `role` and revokes existing sessions. |
+| `PATCH /users/:id/status` | Activates/deactivates an account and revokes existing sessions. |
+
+An account cannot deactivate itself. The final active `OWNER` in an
+organization cannot be deactivated or demoted; mutations use a PostgreSQL
+transaction-level advisory lock per organization so concurrent requests cannot
+bypass that invariant. User responses never expose password hashes or
+`tokenVersion`.
+
 ## Private document storage
 
 Documents are never served from a public static directory. Every document route

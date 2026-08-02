@@ -9,6 +9,7 @@ import { ResetPasswordDto } from './dto/reset-password.dto';
 import { ChangePasswordDto } from './dto/change-password.dto';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { AuthThrottlerGuard } from './guards/auth-throttler.guard';
+import { AllowAuthenticated } from './decorators/allow-authenticated.decorator';
 
 interface AuthenticatedUser {
   id: string;
@@ -55,6 +56,7 @@ export class AuthController {
   }
 
   @Post('change-password')
+  @AllowAuthenticated()
   changePassword(
     @CurrentUser() user: AuthenticatedUser,
     @Body() dto: ChangePasswordDto,

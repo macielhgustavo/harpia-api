@@ -39,6 +39,8 @@ async function main() {
       password: await bcrypt.hash('harpia123', 10),
       name: 'Admin Harpia',
       organizationId,
+      role: 'OWNER',
+      acceptedAt: new Date(),
     },
   });
 

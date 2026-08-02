@@ -40,7 +40,11 @@ export class UnitsService {
     });
   }
 
-  async findOne(id: string, organizationId: string) {
+  async findOne(
+    id: string,
+    organizationId: string,
+    includeFinancialData = false,
+  ) {
     const unit = await this.prisma.unit.findFirst({
       where: { id, organizationId },
       include: {
@@ -50,7 +54,10 @@ export class UnitsService {
             priceTable: { select: { id: true, name: true, phase: true } },
           },
         },
-        documents: { select: documentPublicSelect },
+        documents: {
+          where: includeFinancialData ? undefined : { investmentId: null },
+          select: documentPublicSelect,
+        },
       },
     });
     if (!unit) throw new NotFoundException('Unidade não encontrada');

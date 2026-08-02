@@ -1,0 +1,109 @@
+import { UserRole } from '@prisma/client';
+import { ALL_PERMISSIONS, PERMISSIONS } from './permissions';
+import { ROLE_PERMISSIONS } from './role-permissions';
+
+describe('ROLE_PERMISSIONS', () => {
+  it('gives OWNER and ADMIN every permission', () => {
+    expect(ROLE_PERMISSIONS[UserRole.OWNER]).toEqual(ALL_PERMISSIONS);
+    expect(ROLE_PERMISSIONS[UserRole.ADMIN]).toEqual(ALL_PERMISSIONS);
+  });
+
+  it('gives FINANCEIRO operational reads and financial writes and exports', () => {
+    expect(ROLE_PERMISSIONS[UserRole.FINANCEIRO]).toEqual([
+      PERMISSIONS.PEOPLE_READ,
+      PERMISSIONS.COMPANIES_READ,
+      PERMISSIONS.BANK_ACCOUNTS_READ,
+      PERMISSIONS.BANK_ACCOUNTS_WRITE,
+      PERMISSIONS.DEVELOPMENTS_READ,
+      PERMISSIONS.UNITS_READ,
+      PERMISSIONS.PRICES_READ,
+      PERMISSIONS.INVESTMENTS_READ,
+      PERMISSIONS.INVESTMENTS_WRITE,
+      PERMISSIONS.RETURNS_READ,
+      PERMISSIONS.RETURNS_WRITE,
+      PERMISSIONS.DOCUMENTS_READ,
+      PERMISSIONS.INTERACTIONS_READ,
+      PERMISSIONS.DASHBOARD_READ,
+      PERMISSIONS.REPORTS_EXPORT,
+      PERMISSIONS.FINANCE_READ,
+      PERMISSIONS.FINANCE_WRITE,
+    ]);
+  });
+
+  it('gives COMERCIAL exactly the sales-facing operational permissions', () => {
+    expect(ROLE_PERMISSIONS[UserRole.COMERCIAL]).toEqual([
+      PERMISSIONS.PEOPLE_READ,
+      PERMISSIONS.PEOPLE_WRITE,
+      PERMISSIONS.COMPANIES_READ,
+      PERMISSIONS.DEVELOPMENTS_READ,
+      PERMISSIONS.UNITS_READ,
+      PERMISSIONS.PRICES_READ,
+      PERMISSIONS.DOCUMENTS_READ,
+      PERMISSIONS.DOCUMENTS_WRITE,
+      PERMISSIONS.INTERACTIONS_READ,
+      PERMISSIONS.INTERACTIONS_WRITE,
+      PERMISSIONS.CRM_READ,
+      PERMISSIONS.CRM_WRITE,
+      PERMISSIONS.SALES_READ,
+      PERMISSIONS.SALES_WRITE,
+    ]);
+  });
+
+  it('gives OPERACIONAL exactly the delivery-facing operational permissions', () => {
+    expect(ROLE_PERMISSIONS[UserRole.OPERACIONAL]).toEqual([
+      PERMISSIONS.PEOPLE_READ,
+      PERMISSIONS.COMPANIES_READ,
+      PERMISSIONS.DEVELOPMENTS_READ,
+      PERMISSIONS.DEVELOPMENTS_WRITE,
+      PERMISSIONS.UNITS_READ,
+      PERMISSIONS.UNITS_WRITE,
+      PERMISSIONS.PRICES_READ,
+      PERMISSIONS.PRICES_WRITE,
+      PERMISSIONS.DOCUMENTS_READ,
+      PERMISSIONS.DOCUMENTS_WRITE,
+      PERMISSIONS.INTERACTIONS_READ,
+      PERMISSIONS.INTERACTIONS_WRITE,
+    ]);
+  });
+
+  it('keeps current financial dashboard and exports away from nonfinancial roles', () => {
+    const nonfinancialRoles = [
+      UserRole.COMERCIAL,
+      UserRole.OPERACIONAL,
+      UserRole.LEITURA,
+    ];
+    const financialPermissions = [
+      PERMISSIONS.BANK_ACCOUNTS_READ,
+      PERMISSIONS.BANK_ACCOUNTS_WRITE,
+      PERMISSIONS.INVESTMENTS_READ,
+      PERMISSIONS.INVESTMENTS_WRITE,
+      PERMISSIONS.RETURNS_READ,
+      PERMISSIONS.RETURNS_WRITE,
+      PERMISSIONS.DASHBOARD_READ,
+      PERMISSIONS.REPORTS_EXPORT,
+      PERMISSIONS.FINANCE_READ,
+      PERMISSIONS.FINANCE_WRITE,
+    ];
+
+    for (const role of nonfinancialRoles) {
+      expect(ROLE_PERMISSIONS[role]).not.toEqual(
+        expect.arrayContaining(financialPermissions),
+      );
+      for (const permission of financialPermissions) {
+        expect(ROLE_PERMISSIONS[role]).not.toContain(permission);
+      }
+    }
+  });
+
+  it('limits LEITURA to nonfinancial read permissions', () => {
+    expect(ROLE_PERMISSIONS[UserRole.LEITURA]).toEqual([
+      PERMISSIONS.PEOPLE_READ,
+      PERMISSIONS.COMPANIES_READ,
+      PERMISSIONS.DEVELOPMENTS_READ,
+      PERMISSIONS.UNITS_READ,
+      PERMISSIONS.PRICES_READ,
+      PERMISSIONS.DOCUMENTS_READ,
+      PERMISSIONS.INTERACTIONS_READ,
+    ]);
+  });
+});

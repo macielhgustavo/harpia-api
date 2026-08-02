@@ -43,6 +43,11 @@ model User {
   email               String               @unique
   password            String
   tokenVersion        Int                  @default(0)
+  role                UserRole             @default(LEITURA)
+  isActive            Boolean              @default(true)
+  lastLoginAt         DateTime?
+  invitedAt           DateTime?
+  acceptedAt          DateTime?
   name                String
   organizationId      String
   organization        Organization         @relation(fields: [organizationId], references: [id])
@@ -51,6 +56,9 @@ model User {
   passwordResetTokens PasswordResetToken[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
+
+  @@index([organizationId, role])
+  @@index([organizationId, isActive])
 }
 
 model PasswordResetToken {
@@ -338,6 +346,15 @@ model Interaction {
 enum PersonDocumentType {
   CPF
   CNPJ
+}
+
+enum UserRole {
+  OWNER
+  ADMIN
+  FINANCEIRO
+  COMERCIAL
+  OPERACIONAL
+  LEITURA
 }
 
 enum PersonType {

@@ -8,7 +8,7 @@ import {
 } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
-import { Prisma } from '@prisma/client';
+import { Prisma, UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { PrismaService } from '../prisma/prisma.service';
 import { getAuthConfigInteger } from './auth-config';
@@ -40,6 +40,7 @@ interface TokenUser {
   email: string;
   organizationId: string;
   tokenVersion: number;
+  role: UserRole;
 }
 
 @Injectable()
@@ -116,6 +117,8 @@ export class AuthService {
             email,
             password: hashedPassword,
             organizationId: organization.id,
+            role: UserRole.OWNER,
+            acceptedAt: new Date(),
           },
         });
       });
@@ -146,26 +149,38 @@ export class AuthService {
       user?.password ?? DUMMY_PASSWORD_HASH,
     );
 
-    if (!user || !validPassword) {
+    if (!user || !validPassword || !user.isActive) {
       this.warnSecurityEvent('auth_login_failed', {
         emailFingerprint: emailFingerprint(email),
       });
       throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
 
+    const authenticatedUser = await this.prisma.user.update({
+      where: { id: user.id },
+      data: { lastLoginAt: new Date() },
+      select: {
+        id: true,
+        email: true,
+        organizationId: true,
+        tokenVersion: true,
+        role: true,
+      },
+    });
+
     this.logSecurityEvent('auth_login_succeeded', {
       userId: user.id,
       emailFingerprint: emailFingerprint(email),
     });
 
-    return this.signToken(user);
+    return this.signToken(authenticatedUser);
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {
     const email = normalizeEmail(dto.email);
     const user = await this.findUserByEmail(email);
 
-    if (!user) {
+    if (!user || !user.isActive) {
       this.logSecurityEvent('auth_password_reset_requested', {
         outcome: 'ignored',
         emailFingerprint: emailFingerprint(email),
@@ -246,10 +261,10 @@ export class AuthService {
 
       const user = await tx.user.findUnique({
         where: { id: resetToken.userId },
-        select: { id: true, email: true, password: true },
+        select: { id: true, email: true, password: true, isActive: true },
       });
 
-      if (!user) {
+      if (!user || !user.isActive) {
         throw new BadRequestException(INVALID_RESET_TOKEN_MESSAGE);
       }
 
@@ -357,6 +372,7 @@ export class AuthService {
         email: user.email,
         organizationId: user.organizationId,
         tokenVersion: user.tokenVersion,
+        role: user.role,
       }),
     };
   }

@@ -13,6 +13,8 @@ import { CreatePriceTableDto } from './dto/create-price-table.dto';
 import { UpdatePriceTableDto } from './dto/update-price-table.dto';
 import { SetUnitPriceDto } from './dto/set-unit-price.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSIONS } from '../auth/permissions/permissions';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 
 interface AuthUser {
   id: string;
@@ -20,6 +22,7 @@ interface AuthUser {
   organizationId: string;
 }
 
+@RequirePermissions(PERMISSIONS.PRICES_READ)
 @Controller('price-tables')
 export class PriceTablesController {
   constructor(private readonly priceTablesService: PriceTablesService) {}
@@ -37,11 +40,13 @@ export class PriceTablesController {
     return this.priceTablesService.findOne(id, user.organizationId);
   }
 
+  @RequirePermissions(PERMISSIONS.PRICES_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreatePriceTableDto) {
     return this.priceTablesService.create(user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.PRICES_WRITE)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -51,12 +56,14 @@ export class PriceTablesController {
     return this.priceTablesService.update(id, user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.PRICES_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.priceTablesService.remove(id, user.organizationId);
   }
 
   // Define/atualiza o preço de uma unidade nesta tabela (upsert).
+  @RequirePermissions(PERMISSIONS.PRICES_WRITE)
   @Post(':id/prices')
   setPrice(
     @Param('id') id: string,

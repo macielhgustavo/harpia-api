@@ -12,6 +12,8 @@ import { InvestmentsService } from './investments.service';
 import { CreateInvestmentDto } from './dto/create-investment.dto';
 import { UpdateInvestmentDto } from './dto/update-investment.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSIONS } from '../auth/permissions/permissions';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 
 interface AuthUser {
   id: string;
@@ -19,6 +21,7 @@ interface AuthUser {
   organizationId: string;
 }
 
+@RequirePermissions(PERMISSIONS.INVESTMENTS_READ)
 @Controller('investments')
 export class InvestmentsController {
   constructor(private readonly investmentsService: InvestmentsService) {}
@@ -36,11 +39,13 @@ export class InvestmentsController {
     return this.investmentsService.findOne(id, user.organizationId);
   }
 
+  @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateInvestmentDto) {
     return this.investmentsService.create(user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -50,6 +55,7 @@ export class InvestmentsController {
     return this.investmentsService.update(id, user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.investmentsService.remove(id, user.organizationId);

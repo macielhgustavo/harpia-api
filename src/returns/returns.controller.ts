@@ -13,6 +13,8 @@ import { ReturnsService } from './returns.service';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { UpdateReturnDto } from './dto/update-return.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSIONS } from '../auth/permissions/permissions';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 
 interface AuthUser {
   id: string;
@@ -20,6 +22,7 @@ interface AuthUser {
   organizationId: string;
 }
 
+@RequirePermissions(PERMISSIONS.RETURNS_READ)
 @Controller('returns')
 export class ReturnsController {
   constructor(private readonly returnsService: ReturnsService) {}
@@ -45,11 +48,13 @@ export class ReturnsController {
     return this.returnsService.findOne(id, user.organizationId);
   }
 
+  @RequirePermissions(PERMISSIONS.RETURNS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateReturnDto) {
     return this.returnsService.create(user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.RETURNS_WRITE)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -59,6 +64,7 @@ export class ReturnsController {
     return this.returnsService.update(id, user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.RETURNS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.returnsService.remove(id, user.organizationId);

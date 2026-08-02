@@ -12,6 +12,8 @@ import { InteractionsService } from './interactions.service';
 import { CreateInteractionDto } from './dto/create-interaction.dto';
 import { UpdateInteractionDto } from './dto/update-interaction.dto';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSIONS } from '../auth/permissions/permissions';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 
 interface AuthUser {
   id: string;
@@ -19,15 +21,13 @@ interface AuthUser {
   organizationId: string;
 }
 
+@RequirePermissions(PERMISSIONS.INTERACTIONS_READ)
 @Controller('interactions')
 export class InteractionsController {
   constructor(private readonly interactionsService: InteractionsService) {}
 
   @Get()
-  findAll(
-    @CurrentUser() user: AuthUser,
-    @Query('personId') personId?: string,
-  ) {
+  findAll(@CurrentUser() user: AuthUser, @Query('personId') personId?: string) {
     return this.interactionsService.findAll(user.organizationId, personId);
   }
 
@@ -36,11 +36,13 @@ export class InteractionsController {
     return this.interactionsService.findOne(id, user.organizationId);
   }
 
+  @RequirePermissions(PERMISSIONS.INTERACTIONS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateInteractionDto) {
     return this.interactionsService.create(user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.INTERACTIONS_WRITE)
   @Patch(':id')
   update(
     @Param('id') id: string,
@@ -50,6 +52,7 @@ export class InteractionsController {
     return this.interactionsService.update(id, user.organizationId, dto);
   }
 
+  @RequirePermissions(PERMISSIONS.INTERACTIONS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.interactionsService.remove(id, user.organizationId);

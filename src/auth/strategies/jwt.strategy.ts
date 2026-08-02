@@ -34,9 +34,15 @@ export class JwtStrategy extends PassportStrategy(Strategy) {
         id: payload.sub,
         organizationId: payload.organizationId,
         tokenVersion: payload.tokenVersion,
+        isActive: true,
         organization: { is: { id: payload.organizationId } },
       },
-      select: { id: true, email: true, organizationId: true },
+      select: {
+        id: true,
+        email: true,
+        organizationId: true,
+        role: true,
+      },
     });
 
     if (!user) {

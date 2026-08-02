@@ -20,6 +20,8 @@ import { InteractionsModule } from './interactions/interactions.module';
 import { DashboardModule } from './dashboard/dashboard.module';
 import { ReportsModule } from './reports/reports.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from './auth/permissions/permissions.guard';
+import { UsersModule } from './users/users.module';
 
 @Module({
   imports: [
@@ -40,8 +42,13 @@ import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
     InteractionsModule,
     DashboardModule,
     ReportsModule,
+    UsersModule,
   ],
   controllers: [AppController],
-  providers: [AppService, { provide: APP_GUARD, useClass: JwtAuthGuard }],
+  providers: [
+    AppService,
+    { provide: APP_GUARD, useClass: JwtAuthGuard },
+    { provide: APP_GUARD, useClass: PermissionsGuard },
+  ],
 })
 export class AppModule {}

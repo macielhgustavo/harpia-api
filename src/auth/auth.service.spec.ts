@@ -2,6 +2,7 @@
 import { BadRequestException, UnauthorizedException } from '@nestjs/common';
 import { ConfigService } from '@nestjs/config';
 import { JwtService } from '@nestjs/jwt';
+import { UserRole } from '@prisma/client';
 import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { hashPasswordResetToken } from './password-reset-token.utils';
@@ -20,6 +21,8 @@ describe('AuthService', () => {
     password: 'password-hash',
     organizationId: 'organization-1',
     tokenVersion: 0,
+    role: UserRole.OWNER,
+    isActive: true,
     ...overrides,
   });
 
@@ -46,6 +49,7 @@ describe('AuthService', () => {
       user: {
         findFirst: jest.fn().mockResolvedValue(null),
         findUnique: jest.fn().mockResolvedValue(null),
+        update: jest.fn().mockResolvedValue(makeUser()),
       },
       $transaction: jest.fn((callback: (tx: typeof transaction) => unknown) =>
         Promise.resolve(callback(transaction)),
@@ -76,6 +80,7 @@ describe('AuthService', () => {
       password: await bcrypt.hash('harpia123', 10),
     });
     prisma.user.findFirst.mockResolvedValue(seedUser);
+    prisma.user.update.mockResolvedValue(seedUser);
 
     await expect(
       service.login({ email: ' Admin@Harpia.com ', password: 'harpia123' }),
@@ -90,7 +95,14 @@ describe('AuthService', () => {
       email: 'admin@harpia.com',
       organizationId: 'organization-1',
       tokenVersion: 0,
+      role: UserRole.OWNER,
     });
+    expect(prisma.user.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'user-1' },
+        data: { lastLoginAt: expect.any(Date) },
+      }),
+    );
   });
 
   it('returns the same generic error for an unknown account and a wrong password', async () => {
@@ -110,6 +122,25 @@ describe('AuthService', () => {
     });
   });
 
+  it('rejects inactive accounts with the generic login error', async () => {
+    prisma.user.findFirst.mockResolvedValue(
+      makeUser({
+        password: await bcrypt.hash('SenhaCorreta1!', 10),
+        isActive: false,
+      }),
+    );
+
+    await expect(
+      service.login({
+        email: 'user@example.com',
+        password: 'SenhaCorreta1!',
+      }),
+    ).rejects.toMatchObject<Partial<UnauthorizedException>>({
+      message: 'Credenciais inválidas',
+    });
+    expect(prisma.user.update).not.toHaveBeenCalled();
+  });
+
   it('enforces the policy, serializes normalized registration and signs tokenVersion', async () => {
     const result = await service.register({
       name: 'Novo Usuário',
@@ -126,7 +157,10 @@ describe('AuthService', () => {
       }),
     );
     expect(jwtService.sign).toHaveBeenCalledWith(
-      expect.objectContaining({ tokenVersion: 0 }),
+      expect.objectContaining({
+        tokenVersion: 0,
+        role: UserRole.OWNER,
+      }),
     );
   });
 

@@ -29,14 +29,21 @@ export class PeopleService {
     });
   }
 
-  async findOne(id: string, organizationId: string) {
+  async findOne(
+    id: string,
+    organizationId: string,
+    includeFinancialData = false,
+  ) {
     const person = await this.prisma.person.findFirst({
       where: { id, organizationId },
       include: {
         roles: true,
-        investments: true,
+        investments: includeFinancialData,
         interactions: true,
-        documents: { select: documentPublicSelect },
+        documents: {
+          where: includeFinancialData ? undefined : { investmentId: null },
+          select: documentPublicSelect,
+        },
       },
     });
     if (!person) throw new NotFoundException('Pessoa não encontrada');
@@ -98,14 +105,19 @@ export class PeopleService {
     });
     if (investments > 0) {
       throw new ConflictException(
-        'Pessoa possui investimentos vinculados e não pode ser removida',
+        'Pessoa possui vínculos existentes e não pode ser removida',
       );
     }
 
     return this.prisma.person.delete({ where: { id } });
   }
 
-  async addRole(id: string, organizationId: string, role: PersonRoleType) {
+  async addRole(
+    id: string,
+    organizationId: string,
+    role: PersonRoleType,
+    includeFinancialData = false,
+  ) {
     await this.ensureExists(id, organizationId);
     try {
       await this.prisma.personRole.create({
@@ -120,10 +132,15 @@ export class PeopleService {
       }
       throw e;
     }
-    return this.findOne(id, organizationId);
+    return this.findOne(id, organizationId, includeFinancialData);
   }
 
-  async removeRole(id: string, organizationId: string, role: PersonRoleType) {
+  async removeRole(
+    id: string,
+    organizationId: string,
+    role: PersonRoleType,
+    includeFinancialData = false,
+  ) {
     await this.ensureExists(id, organizationId);
     const existing = await this.prisma.personRole.findUnique({
       where: { personId_role: { personId: id, role } },
@@ -134,7 +151,7 @@ export class PeopleService {
     await this.prisma.personRole.delete({
       where: { personId_role: { personId: id, role } },
     });
-    return this.findOne(id, organizationId);
+    return this.findOne(id, organizationId, includeFinancialData);
   }
 
   private async ensureExists(id: string, organizationId: string) {

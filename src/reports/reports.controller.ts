@@ -1,6 +1,8 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSIONS } from '../auth/permissions/permissions';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { CaptationsReportQueryDto } from './dto/captations-report-query.dto';
 import { InvestorPositionsReportQueryDto } from './dto/investor-positions-report-query.dto';
 import { OverdueReturnsReportQueryDto } from './dto/overdue-returns-report-query.dto';
@@ -13,6 +15,7 @@ interface AuthUser {
   organizationId: string;
 }
 
+@RequirePermissions(PERMISSIONS.REPORTS_EXPORT)
 @Controller('reports')
 export class ReportsController {
   constructor(private readonly reportsService: ReportsService) {}

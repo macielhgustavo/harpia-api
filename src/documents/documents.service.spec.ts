@@ -1,4 +1,8 @@
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ForbiddenException,
+  NotFoundException,
+} from '@nestjs/common';
 import { DocumentCategory } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { Readable } from 'stream';
@@ -145,9 +149,50 @@ describe('DocumentsService', () => {
       NotFoundException,
     );
     expect(prisma.document.findFirst).toHaveBeenCalledWith({
-      where: { id: 'document-1', organizationId: 'org-a' },
+      where: {
+        id: 'document-1',
+        organizationId: 'org-a',
+        investmentId: null,
+      },
     });
     expect(storage.getDownload).not.toHaveBeenCalled();
+  });
+
+  it('hides investment-linked documents from callers without financial access', async () => {
+    prisma.document.findMany.mockResolvedValue([]);
+
+    await expect(service.findAll('org-a', {})).resolves.toEqual([]);
+    expect(prisma.document.findMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org-a', investmentId: null },
+      include: {
+        person: { select: { id: true, name: true } },
+        investment: false,
+        unit: { select: { id: true, identifier: true } },
+        development: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
+
+    await expect(
+      service.findAll('org-a', { investmentId: 'investment-1' }),
+    ).rejects.toBeInstanceOf(ForbiddenException);
+  });
+
+  it('returns investment context only to callers with financial access', async () => {
+    prisma.document.findMany.mockResolvedValue([]);
+
+    await service.findAll('org-a', { investmentId: 'investment-1' }, true);
+
+    expect(prisma.document.findMany).toHaveBeenCalledWith({
+      where: { organizationId: 'org-a', investmentId: 'investment-1' },
+      include: {
+        person: { select: { id: true, name: true } },
+        investment: { select: { id: true, amount: true } },
+        unit: { select: { id: true, identifier: true } },
+        development: { select: { id: true, name: true } },
+      },
+      orderBy: { createdAt: 'desc' },
+    });
   });
 
   it('deletes the stored object before deleting a valid record', async () => {

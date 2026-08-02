@@ -11,9 +11,13 @@ import {
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
+import { UserRole } from '@prisma/client';
 import type { Response } from 'express';
 import { memoryStorage } from 'multer';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { PERMISSIONS } from '../auth/permissions/permissions';
+import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
+import { hasPermission } from '../auth/permissions/role-permissions';
 import { buildAttachmentContentDisposition } from '../storage/storage.utils';
 import { MAX_DOCUMENT_FILE_SIZE } from './document-file.validation';
 import { DocumentsService } from './documents.service';
@@ -23,8 +27,10 @@ interface AuthUser {
   id: string;
   email: string;
   organizationId: string;
+  role: UserRole;
 }
 
+@RequirePermissions(PERMISSIONS.DOCUMENTS_READ)
 @Controller('documents')
 export class DocumentsController {
   constructor(private readonly documentsService: DocumentsService) {}
@@ -37,12 +43,16 @@ export class DocumentsController {
     @Query('unitId') unitId?: string,
     @Query('developmentId') developmentId?: string,
   ) {
-    return this.documentsService.findAll(user.organizationId, {
-      personId,
-      investmentId,
-      unitId,
-      developmentId,
-    });
+    return this.documentsService.findAll(
+      user.organizationId,
+      {
+        personId,
+        investmentId,
+        unitId,
+        developmentId,
+      },
+      hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
+    );
   }
 
   @Get(':id/download')
@@ -54,6 +64,7 @@ export class DocumentsController {
     const download = await this.documentsService.download(
       id,
       user.organizationId,
+      hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
     );
 
     if (download.type === 'url') {
@@ -77,9 +88,14 @@ export class DocumentsController {
 
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.documentsService.findOne(id, user.organizationId);
+    return this.documentsService.findOne(
+      id,
+      user.organizationId,
+      hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
+    );
   }
 
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_WRITE)
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {
@@ -92,11 +108,21 @@ export class DocumentsController {
     @Body() dto: CreateDocumentDto,
     @UploadedFile() file: Express.Multer.File,
   ) {
-    return this.documentsService.create(user.organizationId, dto, file);
+    return this.documentsService.create(
+      user.organizationId,
+      dto,
+      file,
+      hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
+    );
   }
 
+  @RequirePermissions(PERMISSIONS.DOCUMENTS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.documentsService.remove(id, user.organizationId);
+    return this.documentsService.remove(
+      id,
+      user.organizationId,
+      hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
+    );
   }
 }

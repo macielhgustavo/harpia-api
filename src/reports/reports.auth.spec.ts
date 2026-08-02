@@ -2,10 +2,12 @@ import { INestApplication } from '@nestjs/common';
 import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { PassportModule } from '@nestjs/passport';
+import { UserRole } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { sign } from 'jsonwebtoken';
 import request from 'supertest';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
+import { PermissionsGuard } from '../auth/permissions/permissions.guard';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReportsController } from './reports.controller';
@@ -25,9 +27,21 @@ describe('ReportsController authentication', () => {
         id: 'user-a',
         email: 'user@example.com',
         organizationId: 'organization-a',
+        role: UserRole.OWNER,
       }),
     },
   };
+
+  const createToken = () =>
+    sign(
+      {
+        sub: 'user-a',
+        email: 'user@example.com',
+        organizationId: 'organization-a',
+        tokenVersion: 0,
+      },
+      'reports-test-secret',
+    );
 
   beforeAll(async () => {
     const moduleRef = await Test.createTestingModule({
@@ -45,6 +59,7 @@ describe('ReportsController authentication', () => {
         { provide: PrismaService, useValue: prisma },
         { provide: ReportsService, useValue: reportsService },
         { provide: APP_GUARD, useClass: JwtAuthGuard },
+        { provide: APP_GUARD, useClass: PermissionsGuard },
       ],
     }).compile();
 
@@ -54,6 +69,10 @@ describe('ReportsController authentication', () => {
 
   afterAll(async () => {
     await app.close();
+  });
+
+  beforeEach(() => {
+    jest.clearAllMocks();
   });
 
   it('returns 401 before reaching a financial report route without a JWT', async () => {
@@ -66,6 +85,23 @@ describe('ReportsController authentication', () => {
     expect(reportsService.captations).not.toHaveBeenCalled();
   });
 
+  it('returns 403 for an authenticated nonfinancial role', async () => {
+    prisma.user.findFirst.mockResolvedValueOnce({
+      id: 'user-a',
+      email: 'user@example.com',
+      organizationId: 'organization-a',
+      role: UserRole.LEITURA,
+    });
+    const httpServer = app.getHttpServer() as Parameters<typeof request>[0];
+
+    await request(httpServer)
+      .get('/reports/captations?format=xlsx')
+      .set('Authorization', `Bearer ${createToken()}`)
+      .expect(403);
+
+    expect(reportsService.captations).not.toHaveBeenCalled();
+  });
+
   it('sends the generated report as raw bytes rather than a JSON Buffer object', async () => {
     const report = {
       buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
@@ -74,20 +110,11 @@ describe('ReportsController authentication', () => {
       extension: 'xlsx' as const,
     };
     reportsService.captations.mockResolvedValue(report);
-    const token = sign(
-      {
-        sub: 'user-a',
-        email: 'user@example.com',
-        organizationId: 'organization-a',
-        tokenVersion: 0,
-      },
-      'reports-test-secret',
-    );
     const httpServer = app.getHttpServer() as Parameters<typeof request>[0];
 
     const response = await request(httpServer)
       .get('/reports/captations?format=xlsx')
-      .set('Authorization', `Bearer ${token}`)
+      .set('Authorization', `Bearer ${createToken()}`)
       .expect(200);
 
     expect(response.headers['content-type']).toContain(
@@ -100,5 +127,28 @@ describe('ReportsController authentication', () => {
     expect(response.headers['content-length']).toBe(
       String(report.buffer.length),
     );
+  });
+
+  it('allows FINANCEIRO to export reports', async () => {
+    prisma.user.findFirst.mockResolvedValueOnce({
+      id: 'user-a',
+      email: 'user@example.com',
+      organizationId: 'organization-a',
+      role: UserRole.FINANCEIRO,
+    });
+    reportsService.captations.mockResolvedValue({
+      buffer: Buffer.from([0x50, 0x4b]),
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      extension: 'xlsx' as const,
+    });
+    const httpServer = app.getHttpServer() as Parameters<typeof request>[0];
+
+    await request(httpServer)
+      .get('/reports/captations?format=xlsx')
+      .set('Authorization', `Bearer ${createToken()}`)
+      .expect(200);
+
+    expect(reportsService.captations).toHaveBeenCalledTimes(1);
   });
 });
