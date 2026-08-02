@@ -21,59 +21,59 @@ export class ReportsController {
   async captations(
     @CurrentUser() user: AuthUser,
     @Query() query: CaptationsReportQueryDto,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<Buffer> {
+    @Res() response: Response,
+  ): Promise<void> {
     const report = await this.reportsService.captations(
       user.organizationId,
       query,
     );
-    return this.send(response, report, 'captacoes');
+    this.send(response, report, 'captacoes');
   }
 
   @Get('returns')
   async returns(
     @CurrentUser() user: AuthUser,
     @Query() query: ReturnsReportQueryDto,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<Buffer> {
+    @Res() response: Response,
+  ): Promise<void> {
     const report = await this.reportsService.returns(
       user.organizationId,
       query,
     );
-    return this.send(response, report, 'retornos');
+    this.send(response, report, 'retornos');
   }
 
   @Get('overdue-returns')
   async overdueReturns(
     @CurrentUser() user: AuthUser,
     @Query() query: OverdueReturnsReportQueryDto,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<Buffer> {
+    @Res() response: Response,
+  ): Promise<void> {
     const report = await this.reportsService.overdueReturns(
       user.organizationId,
       query,
     );
-    return this.send(response, report, 'retornos-em-atraso');
+    this.send(response, report, 'retornos-em-atraso');
   }
 
   @Get('investor-positions')
   async investorPositions(
     @CurrentUser() user: AuthUser,
     @Query() query: InvestorPositionsReportQueryDto,
-    @Res({ passthrough: true }) response: Response,
-  ): Promise<Buffer> {
+    @Res() response: Response,
+  ): Promise<void> {
     const report = await this.reportsService.investorPositions(
       user.organizationId,
       query,
     );
-    return this.send(response, report, 'posicao-por-investidor');
+    this.send(response, report, 'posicao-por-investidor');
   }
 
   private send(
     response: Response,
     report: GeneratedReport,
     reportName: string,
-  ): Buffer {
+  ): void {
     const date = new Date().toISOString().slice(0, 10);
     const filename = `harpia-${reportName}-${date}.${report.extension}`;
 
@@ -83,6 +83,6 @@ export class ReportsController {
       `attachment; filename="${filename}"`,
     );
     response.setHeader('Cache-Control', 'no-store');
-    return report.buffer;
+    response.send(report.buffer);
   }
 }

@@ -3,6 +3,7 @@ import { ConfigModule } from '@nestjs/config';
 import { APP_GUARD } from '@nestjs/core';
 import { PassportModule } from '@nestjs/passport';
 import { Test } from '@nestjs/testing';
+import { sign } from 'jsonwebtoken';
 import request from 'supertest';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
@@ -52,5 +53,40 @@ describe('ReportsController authentication', () => {
       .expect(401);
 
     expect(reportsService.captations).not.toHaveBeenCalled();
+  });
+
+  it('sends the generated report as raw bytes rather than a JSON Buffer object', async () => {
+    const report = {
+      buffer: Buffer.from([0x50, 0x4b, 0x03, 0x04]),
+      contentType:
+        'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+      extension: 'xlsx' as const,
+    };
+    reportsService.captations.mockResolvedValue(report);
+    const token = sign(
+      {
+        sub: 'user-a',
+        email: 'user@example.com',
+        organizationId: 'organization-a',
+      },
+      'reports-test-secret',
+    );
+    const httpServer = app.getHttpServer() as Parameters<typeof request>[0];
+
+    const response = await request(httpServer)
+      .get('/reports/captations?format=xlsx')
+      .set('Authorization', `Bearer ${token}`)
+      .expect(200);
+
+    expect(response.headers['content-type']).toContain(
+      'application/vnd.openxmlformats-officedocument.spreadsheetml.sheet',
+    );
+    expect(response.headers['content-disposition']).toMatch(
+      /^attachment; filename="harpia-captacoes-\d{4}-\d{2}-\d{2}\.xlsx"$/,
+    );
+    expect(response.headers['cache-control']).toBe('no-store');
+    expect(response.headers['content-length']).toBe(
+      String(report.buffer.length),
+    );
   });
 });

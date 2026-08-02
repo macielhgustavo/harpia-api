@@ -30,7 +30,7 @@ describe('ReportsController', () => {
 
     const result = await controller.captations(USER, query, response.value);
 
-    expect(result).toBe(report.buffer);
+    expect(result).toBeUndefined();
     expect(reportsService.captations).toHaveBeenCalledWith(
       USER.organizationId,
       query,
@@ -49,6 +49,7 @@ describe('ReportsController', () => {
       'Cache-Control',
       'no-store',
     );
+    expect(response.send).toHaveBeenCalledWith(report.buffer);
   });
 
   it('passes the authenticated organization to returns and sends PDF headers', async () => {
@@ -59,7 +60,7 @@ describe('ReportsController', () => {
 
     const result = await controller.returns(USER, query, response.value);
 
-    expect(result).toBe(report.buffer);
+    expect(result).toBeUndefined();
     expect(reportsService.returns).toHaveBeenCalledWith(
       USER.organizationId,
       query,
@@ -78,6 +79,7 @@ describe('ReportsController', () => {
       'Cache-Control',
       'no-store',
     );
+    expect(response.send).toHaveBeenCalledWith(report.buffer);
   });
 
   it('passes the authenticated organization to overdue return reports', async () => {
@@ -161,11 +163,14 @@ function createReportsServiceMock(): ReportsServiceMock {
 function responseMock(): {
   value: Response;
   setHeader: jest.Mock<void, [string, string]>;
+  send: jest.Mock<Response, [Buffer]>;
 } {
   const setHeader = jest.fn<void, [string, string]>();
+  const send = jest.fn<Response, [Buffer]>();
   return {
-    value: { setHeader } as unknown as Response,
+    value: { setHeader, send } as unknown as Response,
     setHeader,
+    send,
   };
 }
 
