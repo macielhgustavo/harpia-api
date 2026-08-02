@@ -2,7 +2,7 @@ services:
   - type: web
     name: harpia-api
     env: node
-    buildCommand: npm install && npx prisma generate && npm run build
+    buildCommand: npm install && npx prisma migrate deploy && npx prisma generate && npm run build
     startCommand: npm run start:prod
     envVars:
       - key: DATABASE_URL
@@ -13,3 +13,19 @@ services:
         value: 7d
       - key: NODE_ENV
         value: production
+      - key: STORAGE_DRIVER
+        value: s3
+      - key: S3_ENDPOINT
+        sync: false
+      - key: S3_REGION
+        sync: false
+      - key: S3_BUCKET
+        sync: false
+      - key: S3_ACCESS_KEY_ID
+        sync: false
+      - key: S3_SECRET_ACCESS_KEY
+        sync: false
+      - key: S3_FORCE_PATH_STYLE
+        value: 'false'
+      - key: SIGNED_URL_EXPIRATION_SECONDS
+        value: '300'

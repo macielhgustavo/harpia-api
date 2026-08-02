@@ -6,36 +6,24 @@ import {
   Param,
   Post,
   Query,
+  Res,
   UploadedFile,
   UseInterceptors,
 } from '@nestjs/common';
 import { FileInterceptor } from '@nestjs/platform-express';
-import { diskStorage } from 'multer';
-import { existsSync, mkdirSync } from 'fs';
+import type { Response } from 'express';
+import { memoryStorage } from 'multer';
+import { CurrentUser } from '../auth/decorators/current-user.decorator';
+import { buildAttachmentContentDisposition } from '../storage/storage.utils';
+import { MAX_DOCUMENT_FILE_SIZE } from './document-file.validation';
 import { DocumentsService } from './documents.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
-import { CurrentUser } from '../auth/decorators/current-user.decorator';
 
 interface AuthUser {
   id: string;
   email: string;
   organizationId: string;
 }
-
-const UPLOADS_DIR = './uploads';
-
-export const documentStorage = diskStorage({
-  destination: (_req, _file, cb) => {
-    if (!existsSync(UPLOADS_DIR)) {
-      mkdirSync(UPLOADS_DIR, { recursive: true });
-    }
-    cb(null, UPLOADS_DIR);
-  },
-  filename: (_req, file, cb) => {
-    const sanitized = file.originalname.replace(/[^a-zA-Z0-9.\-_]/g, '_');
-    cb(null, `${Date.now()}-${sanitized}`);
-  },
-});
 
 @Controller('documents')
 export class DocumentsController {
@@ -57,6 +45,36 @@ export class DocumentsController {
     });
   }
 
+  @Get(':id/download')
+  async download(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Res() response: Response,
+  ) {
+    const download = await this.documentsService.download(
+      id,
+      user.organizationId,
+    );
+
+    if (download.type === 'url') {
+      return response.redirect(download.url);
+    }
+
+    response.setHeader('Content-Type', download.mimeType);
+    response.setHeader(
+      'Content-Disposition',
+      buildAttachmentContentDisposition(download.originalName),
+    );
+    download.stream.once('error', () => {
+      if (!response.headersSent) {
+        response.status(500).end();
+        return;
+      }
+      response.destroy();
+    });
+    return download.stream.pipe(response);
+  }
+
   @Get(':id')
   findOne(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.documentsService.findOne(id, user.organizationId);
@@ -65,8 +83,8 @@ export class DocumentsController {
   @Post()
   @UseInterceptors(
     FileInterceptor('file', {
-      storage: documentStorage,
-      limits: { fileSize: 25 * 1024 * 1024 },
+      storage: memoryStorage(),
+      limits: { fileSize: MAX_DOCUMENT_FILE_SIZE },
     }),
   )
   create(

@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, UnitStatus } from '@prisma/client';
+import { documentPublicSelect } from '../documents/document-response';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateUnitDto } from './dto/create-unit.dto';
 import { UpdateUnitDto } from './dto/update-unit.dto';
@@ -49,7 +50,7 @@ export class UnitsService {
             priceTable: { select: { id: true, name: true, phase: true } },
           },
         },
-        documents: true,
+        documents: { select: documentPublicSelect },
       },
     });
     if (!unit) throw new NotFoundException('Unidade não encontrada');

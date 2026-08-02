@@ -1,13 +1,21 @@
 import {
   BadRequestException,
+  Inject,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
-import { existsSync, unlinkSync } from 'fs';
-import { join } from 'path';
+import { randomUUID } from 'crypto';
 import { PrismaService } from '../prisma/prisma.service';
+import { StorageRegistry } from '../storage/storage.registry';
+import {
+  StorageDownload,
+  StorageObjectNotFoundError,
+  StorageService,
+} from '../storage/storage.service';
 import { CreateDocumentDto } from './dto/create-document.dto';
+import { documentDownloadPath, presentDocument } from './document-response';
+import { validateDocumentFile } from './document-file.validation';
 
 const documentInclude = {
   person: { select: { id: true, name: true } },
@@ -16,30 +24,39 @@ const documentInclude = {
   development: { select: { id: true, name: true } },
 } satisfies Prisma.DocumentInclude;
 
+interface DocumentFilters {
+  personId?: string;
+  investmentId?: string;
+  unitId?: string;
+  developmentId?: string;
+}
+
+type DocumentDownload = StorageDownload & {
+  originalName: string;
+  mimeType: string;
+};
+
 @Injectable()
 export class DocumentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    @Inject(StorageService) private readonly defaultStorage: StorageService,
+    private readonly storageRegistry: StorageRegistry,
+  ) {}
 
-  async findAll(
-    organizationId: string,
-    filters: {
-      personId?: string;
-      investmentId?: string;
-      unitId?: string;
-      developmentId?: string;
-    },
-  ) {
+  async findAll(organizationId: string, filters: DocumentFilters) {
     const where: Prisma.DocumentWhereInput = { organizationId };
     if (filters.personId) where.personId = filters.personId;
     if (filters.investmentId) where.investmentId = filters.investmentId;
     if (filters.unitId) where.unitId = filters.unitId;
     if (filters.developmentId) where.developmentId = filters.developmentId;
 
-    return this.prisma.document.findMany({
+    const documents = await this.prisma.document.findMany({
       where,
       include: documentInclude,
       orderBy: { createdAt: 'desc' },
     });
+    return documents.map((document) => presentDocument(document));
   }
 
   async findOne(id: string, organizationId: string) {
@@ -48,7 +65,7 @@ export class DocumentsService {
       include: documentInclude,
     });
     if (!document) throw new NotFoundException('Documento não encontrado');
-    return document;
+    return presentDocument(document);
   }
 
   async create(
@@ -56,16 +73,31 @@ export class DocumentsService {
     dto: CreateDocumentDto,
     file: Express.Multer.File,
   ) {
-    if (!file) throw new BadRequestException('Arquivo é obrigatório');
+    const validatedFile = validateDocumentFile(file);
+    await this.assertLinksInOrg(dto, organizationId);
+
+    const id = randomUUID();
+    const storageKey = `documents/${randomUUID()}.${validatedFile.extension}`;
+
+    await this.defaultStorage.upload({
+      key: storageKey,
+      body: file.buffer,
+      contentType: validatedFile.mimeType,
+    });
 
     try {
-      await this.assertLinksInOrg(dto, organizationId);
-
-      return await this.prisma.document.create({
+      const document = await this.prisma.document.create({
         data: {
+          id,
           organizationId,
           name: dto.name,
-          fileUrl: `uploads/${file.filename}`,
+          // Preserved for old consumers, but it now resolves through JWT.
+          fileUrl: documentDownloadPath(id),
+          storageKey,
+          storageProvider: this.defaultStorage.provider,
+          originalName: file.originalname || 'document',
+          mimeType: validatedFile.mimeType,
+          size: file.size,
           category: dto.category,
           personId: dto.personId,
           investmentId: dto.investmentId,
@@ -74,11 +106,45 @@ export class DocumentsService {
         },
         include: documentInclude,
       });
-    } catch (e) {
-      // Multer já gravou o arquivo antes da validação — remove o órfão se falhar.
-      const filePath = join(process.cwd(), 'uploads', file.filename);
-      if (existsSync(filePath)) unlinkSync(filePath);
-      throw e;
+      return presentDocument(document);
+    } catch (error) {
+      // The database insert failed after the provider accepted the object.
+      // Cleanup must not hide the original database error.
+      try {
+        await this.defaultStorage.delete(storageKey);
+      } catch {
+        // A cleanup failure is not actionable without masking the DB failure.
+      }
+      throw error;
+    }
+  }
+
+  async download(
+    id: string,
+    organizationId: string,
+  ): Promise<DocumentDownload> {
+    const document = await this.prisma.document.findFirst({
+      where: { id, organizationId },
+    });
+    if (!document) throw new NotFoundException('Documento não encontrado');
+
+    try {
+      const storage = this.storageRegistry.resolve(document.storageProvider);
+      const download = await storage.getDownload({
+        key: document.storageKey,
+        originalName: document.originalName,
+        mimeType: document.mimeType,
+      });
+      return {
+        ...download,
+        originalName: document.originalName,
+        mimeType: document.mimeType,
+      };
+    } catch (error) {
+      if (error instanceof StorageObjectNotFoundError) {
+        throw new NotFoundException('Arquivo do documento não encontrado');
+      }
+      throw error;
     }
   }
 
@@ -88,15 +154,20 @@ export class DocumentsService {
     });
     if (!document) throw new NotFoundException('Documento não encontrado');
 
-    const filePath = join(process.cwd(), document.fileUrl);
-    if (existsSync(filePath)) {
-      unlinkSync(filePath);
+    try {
+      const storage = this.storageRegistry.resolve(document.storageProvider);
+      await storage.delete(document.storageKey);
+    } catch (error) {
+      if (!(error instanceof StorageObjectNotFoundError)) throw error;
     }
 
-    return this.prisma.document.delete({ where: { id } });
+    const deletedDocument = await this.prisma.document.delete({
+      where: { id },
+    });
+    return presentDocument(deletedDocument);
   }
 
-  // Valida que cada vínculo informado pertence à organização.
+  // Validates that each optional relationship belongs to the active tenant.
   private async assertLinksInOrg(
     dto: CreateDocumentDto,
     organizationId: string,

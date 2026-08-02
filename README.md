@@ -57,6 +57,52 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Private document storage
+
+Documents are never served from a public static directory. Every document route
+is protected by the application's JWT guard and download requests are scoped to
+the authenticated user's organization.
+
+For local development, keep the default configuration:
+
+```env
+STORAGE_DRIVER=local
+STORAGE_LOCAL_PATH=./uploads
+```
+
+The local driver stores opaque keys below `STORAGE_LOCAL_PATH` and streams a
+file only through `GET /documents/:id/download`. The file's original name is
+preserved in the download response, while document list/detail responses expose
+the authenticated `downloadUrl` endpoint rather than a public object URL.
+
+For production, configure an S3-compatible private bucket:
+
+```env
+STORAGE_DRIVER=s3
+S3_ENDPOINT=https://your-s3-compatible-endpoint # optional for AWS S3
+S3_REGION=us-east-1
+S3_BUCKET=harpia-private-documents
+S3_ACCESS_KEY_ID=...
+S3_SECRET_ACCESS_KEY=...
+S3_FORCE_PATH_STYLE=false
+SIGNED_URL_EXPIRATION_SECONDS=300
+```
+
+The S3 driver creates a short-lived signed download URL only after the JWT and
+organization checks pass. Keep the bucket private: disable public access and
+grant the application's credential `s3:GetObject`, `s3:PutObject` and
+`s3:DeleteObject` only for the `documents/*` prefix. Also grant
+`s3:ListBucket` on the bucket restricted to that prefix so the API can safely
+distinguish a missing object (404) from an authorization failure. Do not add a
+public bucket policy or expose storage credentials to clients.
+
+The storage provider is recorded per document. The migration marks existing
+records as `local`, so an application can still resolve them through the local
+driver while new uploads use the configured driver. Before switching an
+existing production deployment to S3, copy any retained local files to the
+private bucket and update their provider metadata; files already lost from
+Render's ephemeral disk cannot be recovered.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

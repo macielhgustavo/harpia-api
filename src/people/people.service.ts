@@ -4,6 +4,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma, PersonRoleType } from '@prisma/client';
+import { documentPublicSelect } from '../documents/document-response';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreatePersonDto } from './dto/create-person.dto';
 import { UpdatePersonDto } from './dto/update-person.dto';
@@ -35,7 +36,7 @@ export class PeopleService {
         roles: true,
         investments: true,
         interactions: true,
-        documents: true,
+        documents: { select: documentPublicSelect },
       },
     });
     if (!person) throw new NotFoundException('Pessoa não encontrada');
@@ -127,7 +128,8 @@ export class PeopleService {
     const existing = await this.prisma.personRole.findUnique({
       where: { personId_role: { personId: id, role } },
     });
-    if (!existing) throw new NotFoundException('Papel não encontrado nesta pessoa');
+    if (!existing)
+      throw new NotFoundException('Papel não encontrado nesta pessoa');
 
     await this.prisma.personRole.delete({
       where: { personId_role: { personId: id, role } },

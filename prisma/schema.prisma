@@ -248,7 +248,7 @@ model Allocation {
   investmentId   String
   investment     Investment   @relation(fields: [investmentId], references: [id], onDelete: Cascade)
   developmentId  String?
-  development    Development?  @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  development    Development? @relation(fields: [developmentId], references: [id], onDelete: SetNull)
   amount         Float
   date           DateTime
   notes          String?
@@ -278,22 +278,28 @@ model Return {
 // ---------------------------------------------------------------------------
 
 model Document {
-  id             String           @id @default(cuid())
-  organizationId String
-  organization   Organization     @relation(fields: [organizationId], references: [id])
-  name           String
-  fileUrl        String
-  category       DocumentCategory @default(OUTRO)
-  personId       String?
-  person         Person?          @relation(fields: [personId], references: [id], onDelete: SetNull)
-  investmentId   String?
-  investment     Investment?      @relation(fields: [investmentId], references: [id], onDelete: SetNull)
-  unitId         String?
-  unit           Unit?            @relation(fields: [unitId], references: [id], onDelete: SetNull)
-  developmentId  String?
-  development    Development?     @relation(fields: [developmentId], references: [id], onDelete: SetNull)
-  createdAt      DateTime         @default(now())
-  updatedAt      DateTime         @updatedAt
+  id              String           @id @default(cuid())
+  organizationId  String
+  organization    Organization     @relation(fields: [organizationId], references: [id])
+  name            String
+  // Preserved for compatibility; stores the authenticated download endpoint.
+  fileUrl         String
+  storageKey      String
+  storageProvider String
+  originalName    String
+  mimeType        String
+  size            Int
+  category        DocumentCategory @default(OUTRO)
+  personId        String?
+  person          Person?          @relation(fields: [personId], references: [id], onDelete: SetNull)
+  investmentId    String?
+  investment      Investment?      @relation(fields: [investmentId], references: [id], onDelete: SetNull)
+  unitId          String?
+  unit            Unit?            @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  developmentId   String?
+  development     Development?     @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  createdAt       DateTime         @default(now())
+  updatedAt       DateTime         @updatedAt
 }
 
 model Interaction {
