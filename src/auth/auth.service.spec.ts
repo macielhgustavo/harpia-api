@@ -13,6 +13,7 @@ describe('AuthService', () => {
   let transaction: any;
   let jwtService: { sign: jest.Mock };
   let notifier: { sendPasswordReset: jest.Mock };
+  let invitationsService: { accept: jest.Mock };
   let service: AuthService;
 
   const makeUser = (overrides: Record<string, unknown> = {}) => ({
@@ -44,6 +45,9 @@ describe('AuthService', () => {
         findUnique: jest.fn().mockResolvedValue(null),
         updateMany: jest.fn().mockResolvedValue({ count: 1 }),
       },
+      userInvitation: {
+        findFirst: jest.fn().mockResolvedValue(null),
+      },
     };
     prisma = {
       user: {
@@ -57,6 +61,7 @@ describe('AuthService', () => {
     };
     jwtService = { sign: jest.fn().mockReturnValue('signed-token') };
     notifier = { sendPasswordReset: jest.fn().mockResolvedValue(undefined) };
+    invitationsService = { accept: jest.fn() };
     const configService = {
       get: jest.fn((key: string) => {
         if (key === 'PASSWORD_RESET_FRONTEND_URL') {
@@ -71,6 +76,7 @@ describe('AuthService', () => {
       jwtService as unknown as JwtService,
       configService,
       notifier,
+      invitationsService as any,
     );
   });
 
@@ -160,6 +166,52 @@ describe('AuthService', () => {
       expect.objectContaining({
         tokenVersion: 0,
         role: UserRole.OWNER,
+      }),
+    );
+  });
+
+  it('does not let an invited e-mail create a separate OWNER tenant', async () => {
+    transaction.userInvitation.findFirst.mockResolvedValue({
+      id: 'invitation-1',
+    });
+
+    await expect(
+      service.register({
+        name: 'Usuário Convidado',
+        organizationName: 'Tenant Incorreto',
+        email: 'invited@example.com',
+        password: 'SenhaForte1!',
+      }),
+    ).rejects.toMatchObject({ message: 'E-mail já cadastrado' });
+
+    expect(transaction.organization.create).not.toHaveBeenCalled();
+    expect(transaction.user.create).not.toHaveBeenCalled();
+  });
+
+  it('signs a normal JWT after atomically accepting an invitation', async () => {
+    const invitedUser = makeUser({
+      email: 'invited@example.com',
+      role: UserRole.LEITURA,
+    });
+    invitationsService.accept.mockResolvedValue(invitedUser);
+
+    await expect(
+      service.acceptInvitation({
+        token: 'raw-invitation-token',
+        name: 'Usuário Convidado',
+        password: 'SenhaForte1!',
+      }),
+    ).resolves.toEqual({ access_token: 'signed-token' });
+
+    expect(invitationsService.accept).toHaveBeenCalledWith({
+      token: 'raw-invitation-token',
+      name: 'Usuário Convidado',
+      password: 'SenhaForte1!',
+    });
+    expect(jwtService.sign).toHaveBeenCalledWith(
+      expect.objectContaining({
+        email: 'invited@example.com',
+        role: UserRole.LEITURA,
       }),
     );
   });

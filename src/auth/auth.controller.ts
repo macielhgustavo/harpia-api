@@ -10,6 +10,7 @@ import { ChangePasswordDto } from './dto/change-password.dto';
 import { CurrentUser } from './decorators/current-user.decorator';
 import { AuthThrottlerGuard } from './guards/auth-throttler.guard';
 import { AllowAuthenticated } from './decorators/allow-authenticated.decorator';
+import { AcceptUserInvitationDto } from '../users/invitations/dto/accept-user-invitation.dto';
 
 interface AuthenticatedUser {
   id: string;
@@ -22,7 +23,7 @@ export class AuthController {
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle({ register: {} })
-  @SkipThrottle({ login: true, forgot: true, reset: true })
+  @SkipThrottle({ login: true, forgot: true, reset: true, accept: true })
   @Post('register')
   register(@Body() dto: RegisterDto) {
     return this.authService.register(dto);
@@ -31,7 +32,7 @@ export class AuthController {
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle({ login: {} })
-  @SkipThrottle({ register: true, forgot: true, reset: true })
+  @SkipThrottle({ register: true, forgot: true, reset: true, accept: true })
   @Post('login')
   login(@Body() dto: LoginDto) {
     return this.authService.login(dto);
@@ -40,7 +41,7 @@ export class AuthController {
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle({ forgot: {} })
-  @SkipThrottle({ login: true, register: true, reset: true })
+  @SkipThrottle({ login: true, register: true, reset: true, accept: true })
   @Post('forgot-password')
   forgotPassword(@Body() dto: ForgotPasswordDto) {
     return this.authService.forgotPassword(dto);
@@ -49,10 +50,19 @@ export class AuthController {
   @Public()
   @UseGuards(AuthThrottlerGuard)
   @Throttle({ reset: {} })
-  @SkipThrottle({ login: true, register: true, forgot: true })
+  @SkipThrottle({ login: true, register: true, forgot: true, accept: true })
   @Post('reset-password')
   resetPassword(@Body() dto: ResetPasswordDto) {
     return this.authService.resetPassword(dto);
+  }
+
+  @Public()
+  @UseGuards(AuthThrottlerGuard)
+  @Throttle({ accept: {} })
+  @SkipThrottle({ login: true, register: true, forgot: true, reset: true })
+  @Post('accept-invitation')
+  acceptInvitation(@Body() dto: AcceptUserInvitationDto) {
+    return this.authService.acceptInvitation(dto);
   }
 
   @Post('change-password')

@@ -100,6 +100,7 @@ HAVING count(*) > 1;
 | `POST /auth/login` | Public | `email`, `password` | Returns `401 Credenciais inválidas` for either an unknown account or wrong password. |
 | `POST /auth/forgot-password` | Public | `email` | Always returns the same success message; it does not reveal whether the account exists. |
 | `POST /auth/reset-password` | Public | `token`, `newPassword` | Uses a single-use, expiring recovery token and the strong policy. |
+| `POST /auth/accept-invitation` | Public | `token`, `name`, `password` | Atomically consumes a single-use invitation and returns a JWT. Organization, e-mail and role always come from the invitation. |
 | `POST /auth/change-password` | Bearer JWT | `currentPassword`, `newPassword` | Validates the current password, then revokes previous JWTs and outstanding reset tokens. |
 
 Examples for the future frontend integration:
@@ -139,6 +140,7 @@ document and report endpoints are not globally throttled. Defaults are:
 | Registration | 3 requests / 1 hour |
 | Forgot password | 3 requests / 15 minutes |
 | Reset password | 5 requests / 15 minutes |
+| Accept invitation | 5 requests / 15 minutes |
 
 The values can be changed with the `AUTH_THROTTLE_*` variables in
 `.env.example`. The built-in storage is in-memory per instance and resets on a
@@ -151,6 +153,14 @@ Set these password-recovery variables in each environment:
 ```env
 PASSWORD_RESET_TOKEN_TTL_SECONDS=1800
 PASSWORD_RESET_FRONTEND_URL=https://app.example.com/reset-password
+```
+
+User invitations use equivalent hashed-token safeguards, with a default TTL of
+seven days. Configure the future acceptance screen independently:
+
+```env
+USER_INVITATION_TTL_SECONDS=604800
+USER_INVITATION_FRONTEND_URL=https://app.example.com/accept-invitation
 ```
 
 ## Role-based access control
@@ -190,12 +200,29 @@ All endpoints below require `USERS_MANAGE` and are tenant-scoped:
 | `GET /users/:id` | Returns one account from the active organization. |
 | `PATCH /users/:id/role` | Changes `role` and revokes existing sessions. |
 | `PATCH /users/:id/status` | Activates/deactivates an account and revokes existing sessions. |
+| `POST /users/invitations` | Creates a single pending invitation from `email` and `role`. |
+| `GET /users/invitations` | Lists tenant invitations using a projection that excludes token hashes and URLs. |
+| `POST /users/invitations/:id/revoke` | Revokes one pending invitation from the active organization. |
 
 An account cannot deactivate itself. The final active `OWNER` in an
 organization cannot be deactivated or demoted; mutations use a PostgreSQL
 transaction-level advisory lock per organization so concurrent requests cannot
 bypass that invariant. User responses never expose password hashes or
 `tokenVersion`.
+
+Invitation creation and acceptance serialize the normalized e-mail with the
+same PostgreSQL advisory lock used by registration. This prevents an invited
+address from creating a separate `OWNER` tenant and ensures concurrent accepts
+have only one winner. `ADMIN` cannot create or revoke an `OWNER` invitation.
+The acceptance body never controls the tenant or role. Invalid, expired,
+revoked, already-used and concurrently consumed tokens share one generic public
+error.
+
+Only a SHA-256 token hash is stored. The raw token exists transiently in the
+notifier payload after the invitation transaction commits. The default notifier
+is intentionally no-op and logs only sanitized IDs and an e-mail fingerprint;
+therefore production does not send invitations until a delivery provider is
+configured behind `USER_INVITATION_NOTIFIER`.
 
 ## Private document storage
 

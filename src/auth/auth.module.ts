@@ -12,10 +12,12 @@ import {
   PASSWORD_RESET_NOTIFIER,
 } from './password-reset-notifier';
 import { AuthThrottlerGuard } from './guards/auth-throttler.guard';
+import { UsersModule } from '../users/users.module';
 
 @Module({
   imports: [
     PassportModule,
+    UsersModule,
     JwtModule.registerAsync({
       imports: [ConfigModule],
       useFactory: (config: ConfigService) => ({
@@ -99,6 +101,24 @@ import { AuthThrottlerGuard } from './guards/auth-throttler.guard';
               getAuthConfigInteger(
                 config,
                 'AUTH_THROTTLE_RESET_TTL_SECONDS',
+                900,
+                1,
+                86400,
+              ) * 1000,
+          },
+          {
+            name: 'accept',
+            limit: getAuthConfigInteger(
+              config,
+              'AUTH_THROTTLE_ACCEPT_LIMIT',
+              5,
+              1,
+              1000,
+            ),
+            ttl:
+              getAuthConfigInteger(
+                config,
+                'AUTH_THROTTLE_ACCEPT_TTL_SECONDS',
                 900,
                 1,
                 86400,

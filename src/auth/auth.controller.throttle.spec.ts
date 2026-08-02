@@ -25,6 +25,7 @@ describe('AuthController throttling', () => {
           { name: 'register', limit: 2, ttl: 60_000 },
           { name: 'forgot', limit: 2, ttl: 60_000 },
           { name: 'reset', limit: 2, ttl: 60_000 },
+          { name: 'accept', limit: 2, ttl: 60_000 },
         ]),
       ],
       controllers: [AuthController, OperationalTestController],
@@ -37,6 +38,7 @@ describe('AuthController throttling', () => {
             register: jest.fn(),
             forgotPassword: jest.fn(),
             resetPassword: jest.fn(),
+            acceptInvitation: jest.fn(),
             changePassword: jest.fn(),
           },
         },
@@ -72,6 +74,23 @@ describe('AuthController throttling', () => {
       .expect(201);
     await request(httpServer)
       .post('/auth/forgot-password')
+      .send({})
+      .expect(429);
+  });
+
+  it('applies its independent limit to invitation acceptance', async () => {
+    const httpServer = app.getHttpServer() as Parameters<typeof request>[0];
+
+    await request(httpServer)
+      .post('/auth/accept-invitation')
+      .send({})
+      .expect(201);
+    await request(httpServer)
+      .post('/auth/accept-invitation')
+      .send({})
+      .expect(201);
+    await request(httpServer)
+      .post('/auth/accept-invitation')
       .send({})
       .expect(429);
   });

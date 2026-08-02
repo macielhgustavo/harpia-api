@@ -25,6 +25,8 @@ import {
 } from './password-reset-token.utils';
 import { PASSWORD_RESET_NOTIFIER } from './password-reset-notifier';
 import type { PasswordResetNotifier } from './password-reset-notifier';
+import { AcceptUserInvitationDto } from '../users/invitations/dto/accept-user-invitation.dto';
+import { UserInvitationsService } from '../users/invitations/user-invitations.service';
 
 const BCRYPT_ROUNDS = 10;
 const DUMMY_PASSWORD_HASH =
@@ -55,6 +57,7 @@ export class AuthService {
     private readonly configService: ConfigService,
     @Inject(PASSWORD_RESET_NOTIFIER)
     private readonly passwordResetNotifier: PasswordResetNotifier,
+    private readonly userInvitationsService: UserInvitationsService,
   ) {
     this.passwordResetTtlSeconds = getAuthConfigInteger(
       configService,
@@ -104,6 +107,20 @@ export class AuthService {
         });
 
         if (concurrentUser) {
+          throw new ConflictException('E-mail já cadastrado');
+        }
+
+        const pendingInvitation = await tx.userInvitation.findFirst({
+          where: {
+            email: { equals: email, mode: 'insensitive' },
+            acceptedAt: null,
+            revokedAt: null,
+            expiresAt: { gt: new Date() },
+          },
+          select: { id: true },
+        });
+
+        if (pendingInvitation) {
           throw new ConflictException('E-mail já cadastrado');
         }
 
@@ -174,6 +191,11 @@ export class AuthService {
     });
 
     return this.signToken(authenticatedUser);
+  }
+
+  async acceptInvitation(dto: AcceptUserInvitationDto) {
+    const user = await this.userInvitationsService.accept(dto);
+    return this.signToken(user);
   }
 
   async forgotPassword(dto: ForgotPasswordDto) {

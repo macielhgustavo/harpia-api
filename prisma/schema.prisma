@@ -32,6 +32,7 @@ model Organization {
   returns      Return[]
   documents    Document[]
   interactions Interaction[]
+  invitations  UserInvitation[]
 }
 
 // ---------------------------------------------------------------------------
@@ -54,11 +55,34 @@ model User {
   personId            String?
   person              Person?              @relation(fields: [personId], references: [id], onDelete: SetNull)
   passwordResetTokens PasswordResetToken[]
+  invitationsSent     UserInvitation[]     @relation("UserInvitationInvitedBy")
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
   @@index([organizationId, role])
   @@index([organizationId, isActive])
+}
+
+model UserInvitation {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  email          String
+  role           UserRole
+  tokenHash      String       @unique
+  invitedById    String
+  invitedBy      User         @relation("UserInvitationInvitedBy", fields: [invitedById], references: [id], onDelete: Restrict)
+  expiresAt      DateTime
+  acceptedAt     DateTime?
+  revokedAt      DateTime?
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, email])
+  @@index([email, acceptedAt, revokedAt, expiresAt])
+  @@index([expiresAt])
+  @@index([invitedById])
 }
 
 model PasswordResetToken {
