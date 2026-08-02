@@ -103,6 +103,53 @@ existing production deployment to S3, copy any retained local files to the
 private bucket and update their provider metadata; files already lost from
 Render's ephemeral disk cannot be recovered.
 
+## Financial reports
+
+All report endpoints require a JWT and always scope data to the authenticated
+user's organization. They generate the requested file in memory; reports are
+never persisted to document storage.
+
+| Endpoint                          | Filters                                                                   | Description                                   |
+| --------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------- |
+| `GET /reports/captations`         | `startDate`, `endDate`, `developmentId`, `investorId`, `format`           | Captation by investment period                |
+| `GET /reports/returns`            | `startDate`, `endDate`, `developmentId`, `investorId`, `status`, `format` | Expected and realized returns                 |
+| `GET /reports/overdue-returns`    | `asOfDate`, `developmentId`, `investorId`, `format`                       | Pending returns overdue on the reference date |
+| `GET /reports/investor-positions` | `developmentId`, `investorId`, `format`                                   | Consolidated position by investor             |
+
+`format` is required and accepts only `xlsx` or `pdf`. Date filters use the
+strict calendar format `YYYY-MM-DD`; when a period is supplied, `startDate` and
+`endDate` must be sent together and are inclusive, implemented internally as
+an end-exclusive UTC boundary. A requested period is limited to 366 days and
+reports are limited to 5,000 base records. `asOfDate` is optional and defaults
+to the current UTC date. Captation periods use the investment date, while
+return periods use the expected-return date. Refine the filters when the API
+returns a limit error.
+
+When `developmentId` filters captation or investor-position reports, monetary
+metrics represent only allocations linked to that development. This prevents a
+single investment from being counted repeatedly when it is split between
+developments. The unfiltered reports distinguish allocated capital, explicit
+general-cash allocations, and capital that is not yet allocated.
+
+The database currently uses `Float` for money. Report calculations normalize
+each stored value once to integer cents, add those cents, and convert back only
+for the final report output. Excel values remain numeric and use Brazilian
+currency formatting. Text cells are protected against spreadsheet formula
+injection.
+
+Every download uses `Content-Disposition: attachment` and `Cache-Control:
+no-store`. The PDF includes Harpia metadata, filters, a paginated table, and a
+summary; Excel includes a title, filters, frozen header, automatic filters and
+summary rows.
+
+Examples:
+
+```text
+GET /reports/captations?startDate=2026-01-01&endDate=2026-12-31&format=xlsx
+GET /reports/returns?status=ATRASADO&format=pdf
+GET /reports/investor-positions?format=xlsx
+```
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

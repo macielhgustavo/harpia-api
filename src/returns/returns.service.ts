@@ -5,6 +5,7 @@ import {
 } from '@nestjs/common';
 import { Prisma, ReturnStatus } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
+import { getComputedReturnStatus } from './return-status';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { UpdateReturnDto } from './dto/update-return.dto';
 
@@ -23,7 +24,9 @@ const returnInclude = {
   },
 } satisfies Prisma.ReturnInclude;
 
-type ReturnWithContext = Prisma.ReturnGetPayload<{ include: typeof returnInclude }>;
+type ReturnWithContext = Prisma.ReturnGetPayload<{
+  include: typeof returnInclude;
+}>;
 
 @Injectable()
 export class ReturnsService {
@@ -130,10 +133,10 @@ export class ReturnsService {
   // Reporta ATRASADO quando o status persistido é PENDENTE e a data já venceu.
   // Não altera o banco.
   private withComputedStatus(r: ReturnWithContext) {
-    if (r.status === ReturnStatus.PENDENTE && r.expectedDate < new Date()) {
-      return { ...r, status: ReturnStatus.ATRASADO };
-    }
-    return r;
+    return {
+      ...r,
+      status: getComputedReturnStatus(r.status, r.expectedDate),
+    };
   }
 
   private async assertAllocationInOrg(
