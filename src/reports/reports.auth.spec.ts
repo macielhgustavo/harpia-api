@@ -7,6 +7,7 @@ import { sign } from 'jsonwebtoken';
 import request from 'supertest';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
+import { PrismaService } from '../prisma/prisma.service';
 import { ReportsController } from './reports.controller';
 import { ReportsService } from './reports.service';
 
@@ -17,6 +18,15 @@ describe('ReportsController authentication', () => {
     returns: jest.fn(),
     overdueReturns: jest.fn(),
     investorPositions: jest.fn(),
+  };
+  const prisma = {
+    user: {
+      findFirst: jest.fn().mockResolvedValue({
+        id: 'user-a',
+        email: 'user@example.com',
+        organizationId: 'organization-a',
+      }),
+    },
   };
 
   beforeAll(async () => {
@@ -32,6 +42,7 @@ describe('ReportsController authentication', () => {
       controllers: [ReportsController],
       providers: [
         JwtStrategy,
+        { provide: PrismaService, useValue: prisma },
         { provide: ReportsService, useValue: reportsService },
         { provide: APP_GUARD, useClass: JwtAuthGuard },
       ],
@@ -68,6 +79,7 @@ describe('ReportsController authentication', () => {
         sub: 'user-a',
         email: 'user@example.com',
         organizationId: 'organization-a',
+        tokenVersion: 0,
       },
       'reports-test-secret',
     );

@@ -1,11 +1,8 @@
 import { Transform } from 'class-transformer';
-import { IsEmail, IsString, MaxLength } from 'class-validator';
+import { IsEmail, MaxLength } from 'class-validator';
 import { normalizeEmail } from '../email.utils';
 
-export class RegisterDto {
-  @IsString()
-  name: string;
-
+export class ForgotPasswordDto {
   @Transform(({ value }) => {
     const input: unknown = value;
     return typeof input === 'string' ? normalizeEmail(input) : input;
@@ -13,10 +10,4 @@ export class RegisterDto {
   @IsEmail()
   @MaxLength(254)
   email: string;
-
-  @IsString()
-  password: string;
-
-  @IsString()
-  organizationName: string;
 }

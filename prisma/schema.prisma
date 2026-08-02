@@ -39,16 +39,31 @@ model Organization {
 // ---------------------------------------------------------------------------
 
 model User {
-  id             String       @id @default(cuid())
-  email          String       @unique
-  password       String
-  name           String
-  organizationId String
-  organization   Organization @relation(fields: [organizationId], references: [id])
-  personId       String?
-  person         Person?      @relation(fields: [personId], references: [id], onDelete: SetNull)
-  createdAt      DateTime     @default(now())
-  updatedAt      DateTime     @updatedAt
+  id                  String               @id @default(cuid())
+  email               String               @unique
+  password            String
+  tokenVersion        Int                  @default(0)
+  name                String
+  organizationId      String
+  organization        Organization         @relation(fields: [organizationId], references: [id])
+  personId            String?
+  person              Person?              @relation(fields: [personId], references: [id], onDelete: SetNull)
+  passwordResetTokens PasswordResetToken[]
+  createdAt           DateTime             @default(now())
+  updatedAt           DateTime             @updatedAt
+}
+
+model PasswordResetToken {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
+  @@index([expiresAt])
 }
 
 // ---------------------------------------------------------------------------

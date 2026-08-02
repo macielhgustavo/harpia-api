@@ -57,6 +57,102 @@ $ npm run test:e2e
 $ npm run test:cov
 ```
 
+## Authentication security
+
+The API uses Bearer JWTs without refresh tokens. New JWTs contain a per-user
+`tokenVersion`; the JWT strategy confirms the account, organization and current
+version in the database on every authenticated request. A password change or
+successful recovery increments that version, immediately revoking all previous
+JWTs for that account. Tokens issued by older deployments without
+`tokenVersion` are rejected and require a new login.
+
+New registration, password change and password recovery use one shared policy:
+
+- at least 10 and at most 128 characters;
+- at least one uppercase letter, lowercase letter, number and special
+  character;
+- no leading/trailing whitespace, whitespace-only value, or full e-mail value;
+- no bcrypt-truncated value (bcrypt accepts only 72 UTF-8 bytes safely).
+
+The seed account remains available for backward compatibility:
+`admin@harpia.com` / `harpia123`. Its existing weak password can log in, but it
+cannot be used when creating, changing or recovering a password; change it
+after the first authenticated login.
+
+All account e-mails are trimmed and lowercased before use. Lookups are
+case-insensitive while registration serializes the normalized e-mail inside a
+PostgreSQL transaction, avoiding new case-variant duplicates. Before a future
+data-normalization migration, inspect the production database for historical
+collisions:
+
+```sql
+SELECT lower(btrim("email")) AS normalized_email, count(*)
+FROM "User"
+GROUP BY lower(btrim("email"))
+HAVING count(*) > 1;
+```
+
+### Account endpoints
+
+| Endpoint | Authentication | Body | Behavior |
+| --- | --- | --- | --- |
+| `POST /auth/register` | Public | `name`, `organizationName`, `email`, `password` | Creates a normalized account using the strong policy. |
+| `POST /auth/login` | Public | `email`, `password` | Returns `401 Credenciais inválidas` for either an unknown account or wrong password. |
+| `POST /auth/forgot-password` | Public | `email` | Always returns the same success message; it does not reveal whether the account exists. |
+| `POST /auth/reset-password` | Public | `token`, `newPassword` | Uses a single-use, expiring recovery token and the strong policy. |
+| `POST /auth/change-password` | Bearer JWT | `currentPassword`, `newPassword` | Validates the current password, then revokes previous JWTs and outstanding reset tokens. |
+
+Examples for the future frontend integration:
+
+```bash
+curl -X POST http://localhost:3000/auth/forgot-password \
+  -H "Content-Type: application/json" \
+  -d '{"email":"admin@harpia.com"}'
+
+curl -X POST http://localhost:3000/auth/reset-password \
+  -H "Content-Type: application/json" \
+  -d '{"token":"TOKEN_RECEBIDO","newPassword":"NovaSenha#456"}'
+```
+
+Recovery tokens use 32 random bytes encoded as URL-safe text, but only their
+SHA-256 hash is persisted. The default TTL is 30 minutes and is configurable.
+A new recovery request invalidates any previous tokens for that account. The
+default notifier is intentionally no-op: there is no e-mail provider, no reset
+link/token is logged, and tests capture the notification through an injected
+mock only. A production notifier should be implemented behind the same
+`PASSWORD_RESET_NOTIFIER` contract.
+Expired tokens are rejected on use and old tokens are removed when a new request
+is created. A periodic cleanup job is intentionally not part of this stage.
+
+Authentication events are structured and sanitized: they include an event,
+user ID when applicable and a short SHA-256 e-mail fingerprint. Passwords,
+hashes, JWTs, reset tokens and reset links are never recorded.
+
+### Authentication rate limits
+
+Only the public authentication endpoints use `@nestjs/throttler`; operational,
+document and report endpoints are not globally throttled. Defaults are:
+
+| Route | Default |
+| --- | --- |
+| Login | 5 requests / 60 seconds |
+| Registration | 3 requests / 1 hour |
+| Forgot password | 3 requests / 15 minutes |
+| Reset password | 5 requests / 15 minutes |
+
+The values can be changed with the `AUTH_THROTTLE_*` variables in
+`.env.example`. The built-in storage is in-memory per instance and resets on a
+restart; use shared throttler storage before horizontally scaling the service.
+Render is configured with one trusted proxy hop so throttling uses the forwarded
+client IP rather than a shared proxy address.
+
+Set these password-recovery variables in each environment:
+
+```env
+PASSWORD_RESET_TOKEN_TTL_SECONDS=1800
+PASSWORD_RESET_FRONTEND_URL=https://app.example.com/reset-password
+```
+
 ## Private document storage
 
 Documents are never served from a public static directory. Every document route
