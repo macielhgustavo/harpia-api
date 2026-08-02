@@ -14,6 +14,7 @@ import { getAuthConfigInteger } from '../../auth/auth-config';
 import { emailFingerprint, normalizeEmail } from '../../auth/email.utils';
 import { assertStrongPassword } from '../../auth/password-policy';
 import { PrismaService } from '../../prisma/prisma.service';
+import { acquireTransactionAdvisoryLock } from '../../prisma/advisory-lock';
 import { AcceptUserInvitationDto } from './dto/accept-user-invitation.dto';
 import { CreateUserInvitationDto } from './dto/create-user-invitation.dto';
 import {
@@ -328,9 +329,7 @@ export class UserInvitationsService {
   }
 
   private lockEmail(tx: Prisma.TransactionClient, email: string) {
-    return tx.$queryRaw`
-      SELECT pg_advisory_xact_lock(hashtext(${email}))
-    `;
+    return acquireTransactionAdvisoryLock(tx, email);
   }
 
   private createInvitationUrl(token: string): string {

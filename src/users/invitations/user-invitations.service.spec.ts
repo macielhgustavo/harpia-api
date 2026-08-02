@@ -49,8 +49,8 @@ describe('UserInvitationsService', () => {
       role: UserRole.FINANCEIRO,
     });
 
-    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
-    expect(transaction.$queryRaw.mock.calls[0][1]).toBe(
+    expect(transaction.$executeRaw).toHaveBeenCalledTimes(1);
+    expect(transaction.$executeRaw.mock.calls[0][1]).toBe(
       'convidado@example.com',
     );
     expect(transaction.user.findFirst).toHaveBeenCalledWith({
@@ -281,7 +281,7 @@ describe('UserInvitationsService', () => {
       }),
       data: { acceptedAt: expect.any(Date) },
     });
-    expect(transaction.$queryRaw.mock.calls[0][1]).toBe(
+    expect(transaction.$executeRaw.mock.calls[0][1]).toBe(
       'convidado@example.com',
     );
     expect(transaction.user.create).toHaveBeenCalledWith({
@@ -469,7 +469,7 @@ function createPrismaMock(
 
 function createTransactionMock() {
   return {
-    $queryRaw: jest.fn().mockResolvedValue(undefined),
+    $executeRaw: jest.fn().mockResolvedValue(1),
     user: {
       findFirst: jest.fn(),
       create: jest.fn(),

@@ -8,6 +8,7 @@ import {
 import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
+import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -138,9 +139,7 @@ export class UsersService {
     organizationId: string,
   ) {
     const lockKey = `users:${organizationId}`;
-    await tx.$queryRaw`
-      SELECT pg_advisory_xact_lock(hashtext(${lockKey}))
-    `;
+    await acquireTransactionAdvisoryLock(tx, lockKey);
   }
 
   private async findTarget(

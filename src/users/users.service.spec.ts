@@ -83,7 +83,7 @@ describe('UsersService', () => {
       service.updateRole('user-1', owner, UserRole.FINANCEIRO),
     ).resolves.toMatchObject({ role: UserRole.FINANCEIRO });
 
-    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction.$executeRaw).toHaveBeenCalledTimes(1);
     expect(transaction.user.update).toHaveBeenCalledWith({
       where: { id: 'user-1' },
       data: {
@@ -158,7 +158,7 @@ describe('UsersService', () => {
         id: { not: 'owner-2' },
       },
     });
-    expect(transaction.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+    expect(transaction.$executeRaw.mock.invocationCallOrder[0]).toBeLessThan(
       transaction.user.count.mock.invocationCallOrder[0],
     );
     expect(transaction.user.update).not.toHaveBeenCalled();
@@ -212,7 +212,7 @@ function safeUser(overrides: Record<string, unknown> = {}) {
 
 function createTransactionMock() {
   return {
-    $queryRaw: jest.fn().mockResolvedValue([]),
+    $executeRaw: jest.fn().mockResolvedValue(1),
     user: {
       findFirst: jest.fn(),
       update: jest.fn(),

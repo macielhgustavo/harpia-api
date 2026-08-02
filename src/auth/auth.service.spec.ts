@@ -29,6 +29,7 @@ describe('AuthService', () => {
 
   beforeEach(() => {
     transaction = {
+      $executeRaw: jest.fn().mockResolvedValue(1),
       $queryRaw: jest.fn().mockResolvedValue([]),
       organization: {
         create: jest.fn().mockResolvedValue({ id: 'organization-1' }),
@@ -156,7 +157,7 @@ describe('AuthService', () => {
     });
 
     expect(result).toEqual({ access_token: 'signed-token' });
-    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction.$executeRaw).toHaveBeenCalledTimes(1);
     expect(transaction.user.create).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ email: 'new@example.com' }),

@@ -27,6 +27,7 @@ import { PASSWORD_RESET_NOTIFIER } from './password-reset-notifier';
 import type { PasswordResetNotifier } from './password-reset-notifier';
 import { AcceptUserInvitationDto } from '../users/invitations/dto/accept-user-invitation.dto';
 import { UserInvitationsService } from '../users/invitations/user-invitations.service';
+import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
 
 const BCRYPT_ROUNDS = 10;
 const DUMMY_PASSWORD_HASH =
@@ -92,9 +93,7 @@ export class AuthService {
       const user = await this.prisma.$transaction(async (tx) => {
         // Serialize normalized e-mail creation across API instances without
         // applying an unsafe data-normalization migration to legacy accounts.
-        await tx.$queryRaw`
-          SELECT pg_advisory_xact_lock(hashtext(${email}))
-        `;
+        await acquireTransactionAdvisoryLock(tx, email);
 
         const concurrentUser = await tx.user.findFirst({
           where: {
