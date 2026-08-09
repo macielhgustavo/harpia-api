@@ -1,38 +1,46 @@
 import {
   BadRequestException,
   ForbiddenException,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { DocumentCategory } from '@prisma/client';
 import type { Prisma } from '@prisma/client';
 import { Readable } from 'stream';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import type { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import type { StorageRegistry } from '../storage/storage.registry';
-import type {
-  StorageDownload,
-  StorageDownloadInput,
-  StorageService,
-  StorageUploadInput,
+import {
+  StorageObjectNotFoundError,
+  type StorageDownload,
+  type StorageDownloadInput,
+  type StorageService,
+  type StorageUploadInput,
 } from '../storage/storage.service';
 import { MAX_DOCUMENT_FILE_SIZE } from './document-file.validation';
 import { DocumentsService } from './documents.service';
 
 const PDF_BUFFER = Buffer.from('%PDF-1.7\nminimal document');
+const ACTOR = { id: 'user-a', organizationId: 'org-a' };
 
 describe('DocumentsService', () => {
   let prisma: ReturnType<typeof createPrismaMock>;
   let storage: ReturnType<typeof createStorageMock>;
   let storageRegistry: ReturnType<typeof createStorageRegistryMock>;
+  let audit: ReturnType<typeof createAuditMock>;
   let service: DocumentsService;
 
   beforeEach(() => {
     prisma = createPrismaMock();
     storage = createStorageMock();
     storageRegistry = createStorageRegistryMock(storage);
+    audit = createAuditMock();
     service = new DocumentsService(
       prisma as unknown as PrismaService,
       storage,
       storageRegistry as unknown as StorageRegistry,
+      audit as unknown as AuditService,
     );
   });
 
@@ -40,11 +48,7 @@ describe('DocumentsService', () => {
     const document = createDocument();
     prisma.document.create.mockResolvedValue(document);
 
-    const result = await service.create(
-      'org-a',
-      { name: 'Contrato' },
-      pdfFile(),
-    );
+    const result = await service.create(ACTOR, { name: 'Contrato' }, pdfFile());
 
     const [upload] = storage.upload.mock.calls[0];
     expect(upload.key).toMatch(/^documents\/[\w-]+\.pdf$/);
@@ -66,13 +70,23 @@ describe('DocumentsService', () => {
     });
     expect(result).not.toHaveProperty('storageKey');
     expect(result).not.toHaveProperty('storageProvider');
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        organizationId: 'org-a',
+        actorUserId: 'user-a',
+        action: AUDIT_ACTIONS.DOCUMENT_UPLOADED,
+        entityType: AUDIT_ENTITY_TYPES.DOCUMENT,
+        entityId: 'document-1',
+      }),
+      prisma,
+    );
   });
 
   it('rejects an upload larger than 25 MB before storage', async () => {
     const file = pdfFile({ size: MAX_DOCUMENT_FILE_SIZE + 1 });
 
     await expect(
-      service.create('org-a', { name: 'Contrato' }, file),
+      service.create(ACTOR, { name: 'Contrato' }, file),
     ).rejects.toThrow(BadRequestException);
     expect(storage.upload).not.toHaveBeenCalled();
   });
@@ -84,7 +98,7 @@ describe('DocumentsService', () => {
     });
 
     await expect(
-      service.create('org-a', { name: 'Contrato' }, file),
+      service.create(ACTOR, { name: 'Contrato' }, file),
     ).rejects.toThrow(BadRequestException);
     expect(storage.upload).not.toHaveBeenCalled();
   });
@@ -94,7 +108,7 @@ describe('DocumentsService', () => {
 
     await expect(
       service.create(
-        'org-a',
+        ACTOR,
         { name: 'Contrato', personId: 'missing-person' },
         pdfFile(),
       ),
@@ -107,7 +121,7 @@ describe('DocumentsService', () => {
 
     await expect(
       service.create(
-        'org-a',
+        ACTOR,
         { name: 'Contrato', personId: 'person-from-org-b' },
         pdfFile(),
       ),
@@ -124,7 +138,7 @@ describe('DocumentsService', () => {
     prisma.document.findFirst.mockResolvedValue(createDocument());
     storage.getDownload.mockResolvedValue({ type: 'stream', stream });
 
-    const download = await service.download('document-1', 'org-a');
+    const download = await service.download('document-1', ACTOR);
 
     expect(download).toEqual(
       expect.objectContaining({
@@ -140,12 +154,19 @@ describe('DocumentsService', () => {
       mimeType: 'application/pdf',
     });
     expect(storageRegistry.resolve).toHaveBeenCalledWith('local');
+    expect(audit.record).toHaveBeenCalledWith({
+      organizationId: 'org-a',
+      actorUserId: 'user-a',
+      action: AUDIT_ACTIONS.DOCUMENT_DOWNLOADED,
+      entityType: AUDIT_ENTITY_TYPES.DOCUMENT,
+      entityId: 'document-1',
+    });
   });
 
   it('returns 404 instead of downloading a document from another organization', async () => {
     prisma.document.findFirst.mockResolvedValue(null);
 
-    await expect(service.download('document-1', 'org-a')).rejects.toThrow(
+    await expect(service.download('document-1', ACTOR)).rejects.toThrow(
       NotFoundException,
     );
     expect(prisma.document.findFirst).toHaveBeenCalledWith({
@@ -195,12 +216,12 @@ describe('DocumentsService', () => {
     });
   });
 
-  it('deletes the stored object before deleting a valid record', async () => {
+  it('removes private bytes before committing the deletion and audit', async () => {
     const document = createDocument();
     prisma.document.findFirst.mockResolvedValue(document);
     prisma.document.delete.mockResolvedValue(document);
 
-    await service.remove('document-1', 'org-a');
+    await service.remove('document-1', ACTOR);
 
     expect(storage.delete).toHaveBeenCalledWith('documents/private-key.pdf');
     expect(prisma.document.delete).toHaveBeenCalledWith({
@@ -210,32 +231,116 @@ describe('DocumentsService', () => {
       prisma.document.delete.mock.invocationCallOrder[0],
     );
     expect(storageRegistry.resolve).toHaveBeenCalledWith('local');
+    expect(audit.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'org-a',
+        actorUserId: 'user-a',
+        action: AUDIT_ACTIONS.DOCUMENT_DELETED,
+        entityType: AUDIT_ENTITY_TYPES.DOCUMENT,
+        entityId: 'document-1',
+      },
+      prisma,
+    );
   });
 
   it('returns 404 instead of deleting a document from another organization', async () => {
     prisma.document.findFirst.mockResolvedValue(null);
 
-    await expect(service.remove('document-1', 'org-a')).rejects.toThrow(
+    await expect(service.remove('document-1', ACTOR)).rejects.toThrow(
       NotFoundException,
     );
     expect(storage.delete).not.toHaveBeenCalled();
     expect(prisma.document.delete).not.toHaveBeenCalled();
   });
 
+  it('does not delete or audit the record when private-object cleanup fails', async () => {
+    const document = createDocument();
+    prisma.document.findFirst.mockResolvedValue(document);
+    prisma.document.delete.mockResolvedValue(document);
+    storage.delete.mockRejectedValue(new Error('provider unavailable'));
+
+    await expect(service.remove('document-1', ACTOR)).rejects.toThrow(
+      'provider unavailable',
+    );
+
+    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.document.delete).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('allows a safe retry when the private object was already removed', async () => {
+    const document = createDocument();
+    prisma.document.findFirst.mockResolvedValue(document);
+    prisma.document.delete.mockResolvedValue(document);
+    storage.delete.mockRejectedValue(new StorageObjectNotFoundError());
+
+    await expect(service.remove('document-1', ACTOR)).resolves.toMatchObject({
+      id: 'document-1',
+    });
+
+    expect(prisma.document.delete).toHaveBeenCalled();
+    expect(audit.record).toHaveBeenCalledWith(expect.anything(), prisma);
+  });
+
   it('removes the stored object when the database insert fails', async () => {
     prisma.document.create.mockRejectedValue(new Error('database unavailable'));
 
     await expect(
-      service.create('org-a', { name: 'Contrato' }, pdfFile()),
+      service.create(ACTOR, { name: 'Contrato' }, pdfFile()),
     ).rejects.toThrow('database unavailable');
 
     expect(storage.delete).toHaveBeenCalledWith(
       expect.stringMatching(/^documents\/[\w-]+\.pdf$/),
     );
   });
+
+  it('removes the stored object when the transactional audit fails', async () => {
+    prisma.document.create.mockResolvedValue(createDocument());
+    audit.record.mockRejectedValue(new Error('audit unavailable'));
+
+    await expect(
+      service.create(ACTOR, { name: 'Contrato' }, pdfFile()),
+    ).rejects.toThrow('audit unavailable');
+
+    expect(audit.record).toHaveBeenCalledWith(expect.anything(), prisma);
+    expect(storage.delete).toHaveBeenCalledWith(
+      expect.stringMatching(/^documents\/[\w-]+\.pdf$/),
+    );
+  });
+
+  it('reports a failed upload compensation without masking the database error or logging object details', async () => {
+    const databaseError = new Error('database unavailable');
+    const loggerError = jest
+      .spyOn(Logger.prototype, 'error')
+      .mockImplementation(() => undefined);
+    prisma.document.create.mockRejectedValue(databaseError);
+    storage.delete.mockRejectedValue(new Error('provider unavailable'));
+
+    await expect(
+      service.create(ACTOR, { name: 'Contrato' }, pdfFile()),
+    ).rejects.toBe(databaseError);
+
+    const serializedLog = String(loggerError.mock.calls[0]?.[0]);
+    expect(serializedLog).toContain(
+      '"event":"document_storage_compensation_failed"',
+    );
+    expect(serializedLog).toMatch(/"documentId":"[\w-]+"/);
+    expect(serializedLog).toContain('"organizationId":"org-a"');
+    expect(serializedLog).toContain('"storageProvider":"local"');
+    expect(serializedLog).toContain('"errorName":"Error"');
+    expect(serializedLog).not.toContain('storageKey');
+    expect(serializedLog).not.toContain('contract.pdf');
+    expect(serializedLog).not.toContain('documents/');
+
+    loggerError.mockRestore();
+  });
 });
 
 interface PrismaMock {
+  $transaction: jest.Mock<
+    Promise<unknown>,
+    [(tx: PrismaMock) => Promise<unknown>]
+  >;
   document: {
     findMany: jest.Mock<Promise<unknown>, [unknown]>;
     findFirst: jest.Mock<Promise<unknown>, [unknown]>;
@@ -260,7 +365,11 @@ interface StorageRegistryMock {
 }
 
 function createPrismaMock(): PrismaMock {
-  return {
+  const prisma: PrismaMock = {
+    $transaction: jest.fn<
+      Promise<unknown>,
+      [(tx: PrismaMock) => Promise<unknown>]
+    >(),
     document: {
       findMany: jest.fn<Promise<unknown>, [unknown]>(),
       findFirst: jest.fn<Promise<unknown>, [unknown]>(),
@@ -271,6 +380,14 @@ function createPrismaMock(): PrismaMock {
     investment: { findFirst: jest.fn<Promise<unknown>, [unknown]>() },
     unit: { findFirst: jest.fn<Promise<unknown>, [unknown]>() },
     development: { findFirst: jest.fn<Promise<unknown>, [unknown]>() },
+  };
+  prisma.$transaction.mockImplementation((callback) => callback(prisma));
+  return prisma;
+}
+
+function createAuditMock() {
+  return {
+    record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
   };
 }
 

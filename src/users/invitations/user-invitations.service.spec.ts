@@ -9,11 +9,13 @@ import { ConfigService } from '@nestjs/config';
 import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../../prisma/prisma.service';
 import { UserInvitationsService } from './user-invitations.service';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../../audit/audit-events';
 
 describe('UserInvitationsService', () => {
   let prisma: ReturnType<typeof createPrismaMock>;
   let transaction: ReturnType<typeof createTransactionMock>;
   let notifier: { sendUserInvitation: jest.Mock };
+  let auditService: { record: jest.Mock };
   let service: UserInvitationsService;
 
   const owner = {
@@ -31,7 +33,8 @@ describe('UserInvitationsService', () => {
     transaction = createTransactionMock();
     prisma = createPrismaMock(transaction);
     notifier = { sendUserInvitation: jest.fn().mockResolvedValue(undefined) };
-    service = createService(prisma, notifier);
+    auditService = { record: jest.fn().mockResolvedValue({ id: 'audit-1' }) };
+    service = createService(prisma, notifier, auditService);
   });
 
   afterEach(() => {
@@ -101,6 +104,20 @@ describe('UserInvitationsService', () => {
     expect(result).not.toHaveProperty('tokenHash');
     expect(result).not.toHaveProperty('organizationId');
     expect(result.invitedBy).not.toHaveProperty('email');
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'org-a',
+        actorUserId: 'owner-1',
+        action: AUDIT_ACTIONS.USER_INVITATION_CREATED,
+        entityType: AUDIT_ENTITY_TYPES.USER_INVITATION,
+        entityId: 'invitation-1',
+        metadata: { role: UserRole.FINANCEIRO },
+      },
+      transaction,
+    );
+    expect(auditService.record.mock.invocationCallOrder[0]).toBeLessThan(
+      notifier.sendUserInvitation.mock.invocationCallOrder[0],
+    );
   });
 
   it('rejects an invitation when a case-insensitive user already exists', async () => {
@@ -216,6 +233,17 @@ describe('UserInvitationsService', () => {
       }),
       data: { revokedAt: expect.any(Date) },
     });
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'org-a',
+        actorUserId: 'owner-1',
+        action: AUDIT_ACTIONS.USER_INVITATION_REVOKED,
+        entityType: AUDIT_ENTITY_TYPES.USER_INVITATION,
+        entityId: 'invitation-1',
+        metadata: { role: UserRole.FINANCEIRO },
+      },
+      transaction,
+    );
   });
 
   it('does not reveal or mutate an invitation from another tenant', async () => {
@@ -304,6 +332,20 @@ describe('UserInvitationsService', () => {
       },
     });
     expect(result).toEqual(acceptedUser());
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'org-a',
+        actorUserId: 'user-1',
+        action: AUDIT_ACTIONS.USER_INVITATION_ACCEPTED,
+        entityType: AUDIT_ENTITY_TYPES.USER_INVITATION,
+        entityId: 'invitation-1',
+        metadata: {
+          userId: 'user-1',
+          role: UserRole.FINANCEIRO,
+        },
+      },
+      transaction,
+    );
   });
 
   it('rejects an unknown token with the generic invitation error', async () => {
@@ -426,6 +468,24 @@ describe('UserInvitationsService', () => {
     expect(logged).not.toContain('tokenHash');
     expect(logged).not.toContain('convidado@example.com');
   });
+
+  it('keeps invitation acceptance and audit in one transaction boundary', async () => {
+    transaction.userInvitation.findUnique.mockResolvedValue(rawInvitation());
+    transaction.userInvitation.updateMany.mockResolvedValue({ count: 1 });
+    transaction.user.findFirst.mockResolvedValue(null);
+    transaction.user.create.mockResolvedValue(acceptedUser());
+    auditService.record.mockRejectedValue(new Error('audit unavailable'));
+
+    await expect(
+      service.accept({
+        token: 'valid-token',
+        name: 'Ana',
+        password: 'SenhaForte#123',
+      }),
+    ).rejects.toThrow('audit unavailable');
+
+    expect(auditService.record.mock.calls[0][1]).toBe(transaction);
+  });
 });
 
 const INVALID_INVITATION_MESSAGE = 'Convite inválido ou expirado.';
@@ -436,6 +496,7 @@ const EXPIRES_AT = new Date('2026-08-09T10:00:00.000Z');
 function createService(
   prisma: ReturnType<typeof createPrismaMock>,
   notifier: { sendUserInvitation: jest.Mock },
+  auditService: { record: jest.Mock },
 ) {
   const config = {
     get: jest.fn((key: string) => {
@@ -451,6 +512,7 @@ function createService(
     prisma as unknown as PrismaService,
     config as unknown as ConfigService,
     notifier,
+    auditService as any,
   );
 }
 

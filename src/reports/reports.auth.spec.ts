@@ -6,6 +6,7 @@ import { UserRole } from '@prisma/client';
 import { Test } from '@nestjs/testing';
 import { sign } from 'jsonwebtoken';
 import request from 'supertest';
+import { AuditService } from '../audit/audit.service';
 import { JwtAuthGuard } from '../auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from '../auth/permissions/permissions.guard';
 import { JwtStrategy } from '../auth/strategies/jwt.strategy';
@@ -30,6 +31,9 @@ describe('ReportsController authentication', () => {
         role: UserRole.OWNER,
       }),
     },
+  };
+  const auditService = {
+    record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
   };
 
   const createToken = () =>
@@ -58,6 +62,7 @@ describe('ReportsController authentication', () => {
         JwtStrategy,
         { provide: PrismaService, useValue: prisma },
         { provide: ReportsService, useValue: reportsService },
+        { provide: AuditService, useValue: auditService },
         { provide: APP_GUARD, useClass: JwtAuthGuard },
         { provide: APP_GUARD, useClass: PermissionsGuard },
       ],

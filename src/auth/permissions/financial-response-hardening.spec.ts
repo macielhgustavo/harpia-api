@@ -4,6 +4,10 @@ import { CompaniesService } from '../../companies/companies.service';
 import { DevelopmentsService } from '../../developments/developments.service';
 import { PeopleService } from '../../people/people.service';
 import { UnitsService } from '../../units/units.service';
+import type { AuditService } from '../../audit/audit.service';
+
+const ACTOR = { id: 'user-a', organizationId: 'org-a' };
+const AUDIT = { record: jest.fn() } as unknown as AuditService;
 
 describe('financial response hardening', () => {
   it('omits financial relationships from nonfinancial people and companies queries', async () => {
@@ -15,7 +19,10 @@ describe('financial response hardening', () => {
       },
     };
     const people = new PeopleService(prisma as unknown as PrismaService);
-    const companies = new CompaniesService(prisma as unknown as PrismaService);
+    const companies = new CompaniesService(
+      prisma as unknown as PrismaService,
+      AUDIT,
+    );
 
     await people.findOne('person-1', 'org-a');
     await companies.findAll('org-a');
@@ -56,8 +63,9 @@ describe('financial response hardening', () => {
     };
     const developments = new DevelopmentsService(
       prisma as unknown as PrismaService,
+      AUDIT,
     );
-    const units = new UnitsService(prisma as unknown as PrismaService);
+    const units = new UnitsService(prisma as unknown as PrismaService, AUDIT);
 
     await developments.findOne('development-1', 'org-a');
     await units.findOne('unit-1', 'org-a');
@@ -97,17 +105,15 @@ describe('financial response hardening', () => {
       'org-a',
       true,
     );
-    await new CompaniesService(prisma as unknown as PrismaService).findOne(
-      'company-1',
-      'org-a',
-      true,
-    );
-    await new DevelopmentsService(prisma as unknown as PrismaService).findOne(
-      'development-1',
-      'org-a',
-      true,
-    );
-    await new UnitsService(prisma as unknown as PrismaService).findOne(
+    await new CompaniesService(
+      prisma as unknown as PrismaService,
+      AUDIT,
+    ).findOne('company-1', 'org-a', true);
+    await new DevelopmentsService(
+      prisma as unknown as PrismaService,
+      AUDIT,
+    ).findOne('development-1', 'org-a', true);
+    await new UnitsService(prisma as unknown as PrismaService, AUDIT).findOne(
       'unit-1',
       'org-a',
       true,
@@ -143,6 +149,10 @@ describe('financial response hardening', () => {
   });
 
   it('does not disclose financial relationship types through delete conflicts', async () => {
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([{ id: 'development-1' }]),
+      allocation: { count: jest.fn().mockResolvedValue(1) },
+    };
     const prisma = {
       person: { findFirst: jest.fn().mockResolvedValue({ id: 'person-1' }) },
       investment: { count: jest.fn().mockResolvedValue(1) },
@@ -151,17 +161,21 @@ describe('financial response hardening', () => {
         delete: jest.fn(),
       },
       allocation: { count: jest.fn().mockResolvedValue(1) },
+      $transaction: jest.fn((callback: (tx: typeof transaction) => unknown) =>
+        callback(transaction),
+      ),
     };
     const people = new PeopleService(prisma as unknown as PrismaService);
     const developments = new DevelopmentsService(
       prisma as unknown as PrismaService,
+      AUDIT,
     );
 
     await expect(people.remove('person-1', 'org-a')).rejects.toMatchObject({
       message: 'Pessoa possui vínculos existentes e não pode ser removida',
     });
     await expect(
-      developments.remove('development-1', 'org-a'),
+      developments.remove('development-1', ACTOR),
     ).rejects.toMatchObject({
       message:
         'Empreendimento possui vínculos existentes e não pode ser removido',

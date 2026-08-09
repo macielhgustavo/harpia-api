@@ -23,12 +23,19 @@ export class UnitPricesController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateUnitPriceDto,
   ) {
-    return this.priceTablesService.updatePrice(id, user.organizationId, dto);
+    return this.priceTablesService.updatePrice(
+      id,
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.PRICES_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.priceTablesService.removePrice(id, user.organizationId);
+    return this.priceTablesService.removePrice(id, {
+      id: user.id,
+      organizationId: user.organizationId,
+    });
   }
 }

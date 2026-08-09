@@ -8,10 +8,13 @@ import {
 import { UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UsersService } from './users.service';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import { AuditService } from '../audit/audit.service';
 
 describe('UsersService', () => {
   let prisma: ReturnType<typeof createPrismaMock>;
   let transaction: ReturnType<typeof createTransactionMock>;
+  let auditService: { record: jest.Mock };
   let service: UsersService;
 
   const owner = {
@@ -28,7 +31,11 @@ describe('UsersService', () => {
   beforeEach(() => {
     transaction = createTransactionMock();
     prisma = createPrismaMock(transaction);
-    service = new UsersService(prisma as unknown as PrismaService);
+    auditService = { record: jest.fn().mockResolvedValue({ id: 'audit-1' }) };
+    service = new UsersService(
+      prisma as unknown as PrismaService,
+      auditService as unknown as AuditService,
+    );
   });
 
   it('lists only the tenant users with role, status and normalized search filters', async () => {
@@ -95,6 +102,20 @@ describe('UsersService', () => {
         tokenVersion: expect.anything(),
       }),
     });
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'org-a',
+        actorUserId: 'owner-1',
+        action: AUDIT_ACTIONS.USER_ROLE_CHANGED,
+        entityType: AUDIT_ENTITY_TYPES.USER,
+        entityId: 'user-1',
+        metadata: {
+          oldRole: UserRole.LEITURA,
+          newRole: UserRole.FINANCEIRO,
+        },
+      },
+      transaction,
+    );
   });
 
   it('changes status and revokes existing tokens', async () => {
@@ -112,6 +133,40 @@ describe('UsersService', () => {
           tokenVersion: { increment: 1 },
         },
       }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'org-a',
+        actorUserId: 'owner-1',
+        action: AUDIT_ACTIONS.USER_DEACTIVATED,
+        entityType: AUDIT_ENTITY_TYPES.USER,
+        entityId: 'user-1',
+        metadata: {
+          oldIsActive: true,
+          newIsActive: false,
+        },
+      },
+      transaction,
+    );
+  });
+
+  it('records activation as a distinct audit action', async () => {
+    transaction.user.findFirst.mockResolvedValue(safeUser({ isActive: false }));
+    transaction.user.update.mockResolvedValue(safeUser({ isActive: true }));
+
+    await expect(service.updateStatus('user-1', owner, true)).resolves.toEqual(
+      safeUser({ isActive: true }),
+    );
+
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        action: AUDIT_ACTIONS.USER_ACTIVATED,
+        metadata: {
+          oldIsActive: false,
+          newIsActive: true,
+        },
+      }),
+      transaction,
     );
   });
 
@@ -136,6 +191,7 @@ describe('UsersService', () => {
       service.updateRole('user-1', admin, UserRole.OWNER),
     ).rejects.toThrow(ForbiddenException);
     expect(transaction.user.update).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 
   it('does not demote or deactivate the last active OWNER', async () => {
@@ -162,6 +218,7 @@ describe('UsersService', () => {
       transaction.user.count.mock.invocationCallOrder[0],
     );
     expect(transaction.user.update).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 
   it('does not increment tokenVersion for role or status no-ops', async () => {
@@ -176,6 +233,7 @@ describe('UsersService', () => {
     );
 
     expect(transaction.user.update).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 
   it('returns 404 for a cross-tenant mutation while holding only the actor tenant lock', async () => {
@@ -190,6 +248,22 @@ describe('UsersService', () => {
       }),
     );
     expect(transaction.user.update).not.toHaveBeenCalled();
+  });
+
+  it('uses the mutation transaction for audit failures too', async () => {
+    transaction.user.findFirst.mockResolvedValue(safeUser());
+    transaction.user.update.mockResolvedValue(
+      safeUser({ role: UserRole.COMERCIAL }),
+    );
+    auditService.record.mockRejectedValue(new Error('audit unavailable'));
+
+    await expect(
+      service.updateRole('user-1', owner, UserRole.COMERCIAL),
+    ).rejects.toThrow('audit unavailable');
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.anything(),
+      transaction,
+    );
   });
 });
 

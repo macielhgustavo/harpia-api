@@ -50,7 +50,10 @@ export class CompaniesController {
   @RequirePermissions(PERMISSIONS.COMPANIES_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateCompanyDto) {
-    return this.companiesService.create(user.organizationId, dto);
+    return this.companiesService.create(
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.COMPANIES_WRITE)
@@ -60,12 +63,19 @@ export class CompaniesController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateCompanyDto,
   ) {
-    return this.companiesService.update(id, user.organizationId, dto);
+    return this.companiesService.update(
+      id,
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.COMPANIES_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.companiesService.remove(id, user.organizationId);
+    return this.companiesService.remove(id, {
+      id: user.id,
+      organizationId: user.organizationId,
+    });
   }
 }

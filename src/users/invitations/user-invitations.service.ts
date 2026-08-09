@@ -15,6 +15,8 @@ import { emailFingerprint, normalizeEmail } from '../../auth/email.utils';
 import { assertStrongPassword } from '../../auth/password-policy';
 import { PrismaService } from '../../prisma/prisma.service';
 import { acquireTransactionAdvisoryLock } from '../../prisma/advisory-lock';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../../audit/audit-events';
+import { AuditService } from '../../audit/audit.service';
 import { AcceptUserInvitationDto } from './dto/accept-user-invitation.dto';
 import { CreateUserInvitationDto } from './dto/create-user-invitation.dto';
 import {
@@ -73,6 +75,7 @@ export class UserInvitationsService {
     private readonly configService: ConfigService,
     @Inject(USER_INVITATION_NOTIFIER)
     private readonly invitationNotifier: UserInvitationNotifier,
+    private readonly auditService: AuditService,
   ) {
     this.invitationTtlSeconds = getAuthConfigInteger(
       configService,
@@ -145,7 +148,7 @@ export class UserInvitationsService {
           throw new ConflictException(CREATE_INVITATION_CONFLICT_MESSAGE);
         }
 
-        return tx.userInvitation.create({
+        const createdInvitation = await tx.userInvitation.create({
           data: {
             organizationId: actor.organizationId,
             email,
@@ -156,6 +159,20 @@ export class UserInvitationsService {
           },
           select: SAFE_INVITATION_SELECT,
         });
+
+        await this.auditService.record(
+          {
+            organizationId: actor.organizationId,
+            actorUserId: actor.id,
+            action: AUDIT_ACTIONS.USER_INVITATION_CREATED,
+            entityType: AUDIT_ENTITY_TYPES.USER_INVITATION,
+            entityId: createdInvitation.id,
+            metadata: { role: createdInvitation.role },
+          },
+          tx,
+        );
+
+        return createdInvitation;
       });
     } catch (error) {
       if (this.isUniqueConflict(error)) {
@@ -235,6 +252,18 @@ export class UserInvitationsService {
         throw new NotFoundException('Convite não encontrado.');
       }
 
+      await this.auditService.record(
+        {
+          organizationId: actor.organizationId,
+          actorUserId: actor.id,
+          action: AUDIT_ACTIONS.USER_INVITATION_REVOKED,
+          entityType: AUDIT_ENTITY_TYPES.USER_INVITATION,
+          entityId: result.id,
+          metadata: { role: result.role },
+        },
+        tx,
+      );
+
       return result;
     });
   }
@@ -297,7 +326,7 @@ export class UserInvitationsService {
 
         const password = await bcrypt.hash(dto.password, BCRYPT_ROUNDS);
 
-        return tx.user.create({
+        const acceptedUser = await tx.user.create({
           data: {
             organizationId: invitation.organizationId,
             email: invitation.email,
@@ -310,6 +339,23 @@ export class UserInvitationsService {
           },
           select: ACCEPTED_USER_SELECT,
         });
+
+        await this.auditService.record(
+          {
+            organizationId: invitation.organizationId,
+            actorUserId: acceptedUser.id,
+            action: AUDIT_ACTIONS.USER_INVITATION_ACCEPTED,
+            entityType: AUDIT_ENTITY_TYPES.USER_INVITATION,
+            entityId: invitation.id,
+            metadata: {
+              userId: acceptedUser.id,
+              role: acceptedUser.role,
+            },
+          },
+          tx,
+        );
+
+        return acceptedUser;
       });
     } catch (error) {
       if (this.isUniqueConflict(error)) {

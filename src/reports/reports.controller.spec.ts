@@ -1,5 +1,7 @@
 import 'reflect-metadata';
 import type { Response } from 'express';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import type { AuditService } from '../audit/audit.service';
 import { IS_PUBLIC_KEY } from '../auth/decorators/public.decorator';
 import { ReportFormat } from './dto/report-format-query.dto';
 import { GeneratedReport, ReportsService } from './reports.service';
@@ -13,12 +15,15 @@ const USER = {
 
 describe('ReportsController', () => {
   let reportsService: ReportsServiceMock;
+  let auditService: ReturnType<typeof createAuditServiceMock>;
   let controller: ReportsController;
 
   beforeEach(() => {
     reportsService = createReportsServiceMock();
+    auditService = createAuditServiceMock();
     controller = new ReportsController(
       reportsService as unknown as ReportsService,
+      auditService as unknown as AuditService,
     );
   });
 
@@ -26,7 +31,12 @@ describe('ReportsController', () => {
     const report = xlsxReport();
     reportsService.captations.mockResolvedValue(report);
     const response = responseMock();
-    const query = { format: ReportFormat.XLSX };
+    const query = {
+      format: ReportFormat.XLSX,
+      startDate: '2026-08-01',
+      endDate: '2026-08-31',
+      developmentId: 'development-a',
+    };
 
     const result = await controller.captations(USER, query, response.value);
 
@@ -50,6 +60,23 @@ describe('ReportsController', () => {
       'no-store',
     );
     expect(response.send).toHaveBeenCalledWith(report.buffer);
+    expect(auditService.record).toHaveBeenCalledWith({
+      organizationId: USER.organizationId,
+      actorUserId: USER.id,
+      action: AUDIT_ACTIONS.REPORT_EXPORTED,
+      entityType: AUDIT_ENTITY_TYPES.REPORT,
+      entityId: 'captations',
+      metadata: {
+        reportType: 'captations',
+        format: ReportFormat.XLSX,
+        filters: {
+          startDate: '2026-08-01',
+          endDate: '2026-08-31',
+          developmentId: 'development-a',
+          investorId: undefined,
+        },
+      },
+    });
   });
 
   it('passes the authenticated organization to returns and sends PDF headers', async () => {
@@ -80,6 +107,23 @@ describe('ReportsController', () => {
       'no-store',
     );
     expect(response.send).toHaveBeenCalledWith(report.buffer);
+    expect(auditService.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        actorUserId: USER.id,
+        entityId: 'returns',
+        metadata: {
+          reportType: 'returns',
+          format: ReportFormat.PDF,
+          filters: {
+            startDate: undefined,
+            endDate: undefined,
+            developmentId: undefined,
+            investorId: undefined,
+            status: undefined,
+          },
+        },
+      }),
+    );
   });
 
   it('passes the authenticated organization to overdue return reports', async () => {
@@ -97,6 +141,22 @@ describe('ReportsController', () => {
       'Cache-Control',
       'no-store',
     );
+    expect(auditService.record).toHaveBeenCalledWith({
+      organizationId: USER.organizationId,
+      actorUserId: USER.id,
+      action: AUDIT_ACTIONS.REPORT_EXPORTED,
+      entityType: AUDIT_ENTITY_TYPES.REPORT,
+      entityId: 'overdue-returns',
+      metadata: {
+        reportType: 'overdue-returns',
+        format: ReportFormat.XLSX,
+        filters: {
+          asOfDate: '2026-08-10',
+          developmentId: undefined,
+          investorId: undefined,
+        },
+      },
+    });
   });
 
   it('passes the authenticated organization to investor position reports', async () => {
@@ -116,6 +176,37 @@ describe('ReportsController', () => {
         /^attachment; filename="harpia-posicao-por-investidor-\d{4}-\d{2}-\d{2}\.xlsx"$/,
       ),
     );
+    expect(auditService.record).toHaveBeenCalledWith({
+      organizationId: USER.organizationId,
+      actorUserId: USER.id,
+      action: AUDIT_ACTIONS.REPORT_EXPORTED,
+      entityType: AUDIT_ENTITY_TYPES.REPORT,
+      entityId: 'investor-positions',
+      metadata: {
+        reportType: 'investor-positions',
+        format: ReportFormat.XLSX,
+        filters: {
+          developmentId: undefined,
+          investorId: 'investor-a',
+        },
+      },
+    });
+  });
+
+  it('does not send a generated report when its audit event cannot be persisted', async () => {
+    reportsService.captations.mockResolvedValue(xlsxReport());
+    auditService.record.mockRejectedValue(new Error('audit unavailable'));
+    const response = responseMock();
+
+    await expect(
+      controller.captations(
+        USER,
+        { format: ReportFormat.XLSX },
+        response.value,
+      ),
+    ).rejects.toThrow('audit unavailable');
+
+    expect(response.send).not.toHaveBeenCalled();
   });
 
   it('does not mark the reports controller or any report route as public', () => {
@@ -157,6 +248,12 @@ function createReportsServiceMock(): ReportsServiceMock {
     returns: jest.fn<Promise<GeneratedReport>, [string, unknown]>(),
     overdueReturns: jest.fn<Promise<GeneratedReport>, [string, unknown]>(),
     investorPositions: jest.fn<Promise<GeneratedReport>, [string, unknown]>(),
+  };
+}
+
+function createAuditServiceMock() {
+  return {
+    record: jest.fn().mockResolvedValue({ id: 'audit-1' }),
   };
 }
 

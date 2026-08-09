@@ -4,9 +4,23 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import { PersonRoleType, Prisma } from '@prisma/client';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateInvestmentDto } from './dto/create-investment.dto';
 import { UpdateInvestmentDto } from './dto/update-investment.dto';
+
+interface MutationActor {
+  id: string;
+  organizationId: string;
+}
+
+const INVESTMENT_UPDATE_FIELDS: (keyof UpdateInvestmentDto)[] = [
+  'amount',
+  'date',
+  'type',
+  'notes',
+];
 
 // Investment com allocations incluídas + nome do development de cada uma.
 type InvestmentWithAllocations = Prisma.InvestmentGetPayload<{
@@ -20,7 +34,10 @@ type InvestmentWithAllocations = Prisma.InvestmentGetPayload<{
 
 @Injectable()
 export class InvestmentsService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly audit: AuditService,
+  ) {}
 
   async findAll(organizationId: string, investorId?: string) {
     const where: Prisma.InvestmentWhereInput = { organizationId };
@@ -65,24 +82,37 @@ export class InvestmentsService {
     };
   }
 
-  async create(organizationId: string, dto: CreateInvestmentDto) {
-    await this.assertInvestor(dto.investorId, organizationId);
+  async create(actor: MutationActor, dto: CreateInvestmentDto) {
+    await this.assertInvestor(dto.investorId, actor.organizationId);
 
-    return this.prisma.investment.create({
-      data: {
-        organizationId,
-        investorId: dto.investorId,
-        amount: dto.amount,
-        date: new Date(dto.date),
-        type: dto.type,
-        notes: dto.notes,
-      },
+    return this.prisma.$transaction(async (tx) => {
+      const investment = await tx.investment.create({
+        data: {
+          organizationId: actor.organizationId,
+          investorId: dto.investorId,
+          amount: dto.amount,
+          date: new Date(dto.date),
+          type: dto.type,
+          notes: dto.notes,
+        },
+      });
+      await this.audit.record(
+        {
+          organizationId: actor.organizationId,
+          actorUserId: actor.id,
+          action: AUDIT_ACTIONS.CREATE,
+          entityType: AUDIT_ENTITY_TYPES.INVESTMENT,
+          entityId: investment.id,
+        },
+        tx,
+      );
+      return investment;
     });
   }
 
-  async update(id: string, organizationId: string, dto: UpdateInvestmentDto) {
+  async update(id: string, actor: MutationActor, dto: UpdateInvestmentDto) {
     const investment = await this.prisma.investment.findFirst({
-      where: { id, organizationId },
+      where: { id, organizationId: actor.organizationId },
       include: { allocations: { select: { amount: true } } },
     });
     if (!investment) throw new NotFoundException('Aporte não encontrado');
@@ -100,25 +130,98 @@ export class InvestmentsService {
       }
     }
 
-    return this.prisma.investment.update({
-      where: { id },
-      data: {
-        amount: dto.amount,
-        date: dto.date ? new Date(dto.date) : undefined,
-        type: dto.type,
-        notes: dto.notes,
-      },
+    const changedFields = INVESTMENT_UPDATE_FIELDS.filter(
+      (field) => dto[field] !== undefined,
+    );
+    return this.prisma.$transaction(async (tx) => {
+      const updatedInvestment = await tx.investment.update({
+        where: { id },
+        data: {
+          amount: dto.amount,
+          date: dto.date ? new Date(dto.date) : undefined,
+          type: dto.type,
+          notes: dto.notes,
+        },
+      });
+      await this.audit.record(
+        {
+          organizationId: actor.organizationId,
+          actorUserId: actor.id,
+          action: AUDIT_ACTIONS.UPDATE,
+          entityType: AUDIT_ENTITY_TYPES.INVESTMENT,
+          entityId: updatedInvestment.id,
+          metadata: { changedFields },
+        },
+        tx,
+      );
+      return updatedInvestment;
     });
   }
 
-  async remove(id: string, organizationId: string) {
-    const investment = await this.prisma.investment.findFirst({
-      where: { id, organizationId },
-      select: { id: true },
-    });
-    if (!investment) throw new NotFoundException('Aporte não encontrado');
+  async remove(id: string, actor: MutationActor) {
     // Allocation.investmentId é Cascade, e Return.allocationId também — tudo é removido.
-    return this.prisma.investment.delete({ where: { id } });
+    return this.prisma.$transaction(async (tx) => {
+      const [investment] = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id"
+        FROM "Investment"
+        WHERE "id" = ${id} AND "organizationId" = ${actor.organizationId}
+        FOR UPDATE
+      `;
+      if (!investment) throw new NotFoundException('Aporte não encontrado');
+
+      // O lock das alocações impede retornos novos entre a coleta e o cascade.
+      const cascadedAllocations = await tx.$queryRaw<{ id: string }[]>`
+        SELECT "id"
+        FROM "Allocation"
+        WHERE "investmentId" = ${id}
+          AND "organizationId" = ${actor.organizationId}
+        FOR UPDATE
+      `;
+      const cascadedReturns = await tx.return.findMany({
+        where: {
+          allocationId: { in: cascadedAllocations.map(({ id }) => id) },
+          organizationId: actor.organizationId,
+        },
+        select: { id: true },
+      });
+      const deletedInvestment = await tx.investment.delete({ where: { id } });
+      await this.audit.record(
+        {
+          organizationId: actor.organizationId,
+          actorUserId: actor.id,
+          action: AUDIT_ACTIONS.DELETE,
+          entityType: AUDIT_ENTITY_TYPES.INVESTMENT,
+          entityId: deletedInvestment.id,
+        },
+        tx,
+      );
+      const cascadeSource = {
+        entityType: AUDIT_ENTITY_TYPES.INVESTMENT,
+        entityId: deletedInvestment.id,
+      };
+      await this.audit.recordMany(
+        [
+          ...cascadedAllocations.map((allocation) => ({
+            organizationId: actor.organizationId,
+            actorUserId: actor.id,
+            action: AUDIT_ACTIONS.DELETE,
+            entityType: AUDIT_ENTITY_TYPES.ALLOCATION,
+            entityId: allocation.id,
+            metadata: { cascadeSource },
+          })),
+          ...cascadedReturns.map((investmentReturn) => ({
+            organizationId: actor.organizationId,
+            actorUserId: actor.id,
+            action: AUDIT_ACTIONS.DELETE,
+            entityType: AUDIT_ENTITY_TYPES.RETURN,
+            entityId: investmentReturn.id,
+            metadata: { cascadeSource },
+          })),
+        ],
+        tx,
+      );
+      return deletedInvestment;
+    });
   }
 
   private withComputedAmounts(investment: InvestmentWithAllocations) {
@@ -148,7 +251,9 @@ export class InvestmentsService {
       select: { id: true },
     });
     if (!person) {
-      throw new BadRequestException('Investidor inválido para esta organização');
+      throw new BadRequestException(
+        'Investidor inválido para esta organização',
+      );
     }
 
     const investorRole = await this.prisma.personRole.findUnique({

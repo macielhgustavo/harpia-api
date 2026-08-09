@@ -28,6 +28,8 @@ import type { PasswordResetNotifier } from './password-reset-notifier';
 import { AcceptUserInvitationDto } from '../users/invitations/dto/accept-user-invitation.dto';
 import { UserInvitationsService } from '../users/invitations/user-invitations.service';
 import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import { AuditService } from '../audit/audit.service';
 
 const BCRYPT_ROUNDS = 10;
 const DUMMY_PASSWORD_HASH =
@@ -59,6 +61,7 @@ export class AuthService {
     @Inject(PASSWORD_RESET_NOTIFIER)
     private readonly passwordResetNotifier: PasswordResetNotifier,
     private readonly userInvitationsService: UserInvitationsService,
+    private readonly auditService: AuditService,
   ) {
     this.passwordResetTtlSeconds = getAuthConfigInteger(
       configService,
@@ -172,16 +175,31 @@ export class AuthService {
       throw new UnauthorizedException(INVALID_CREDENTIALS_MESSAGE);
     }
 
-    const authenticatedUser = await this.prisma.user.update({
-      where: { id: user.id },
-      data: { lastLoginAt: new Date() },
-      select: {
-        id: true,
-        email: true,
-        organizationId: true,
-        tokenVersion: true,
-        role: true,
-      },
+    const authenticatedUser = await this.prisma.$transaction(async (tx) => {
+      const updatedUser = await tx.user.update({
+        where: { id: user.id },
+        data: { lastLoginAt: new Date() },
+        select: {
+          id: true,
+          email: true,
+          organizationId: true,
+          tokenVersion: true,
+          role: true,
+        },
+      });
+
+      await this.auditService.record(
+        {
+          organizationId: updatedUser.organizationId,
+          actorUserId: updatedUser.id,
+          action: AUDIT_ACTIONS.AUTH_LOGIN,
+          entityType: AUDIT_ENTITY_TYPES.AUTH_SESSION,
+          entityId: updatedUser.id,
+        },
+        tx,
+      );
+
+      return updatedUser;
     });
 
     this.logSecurityEvent('auth_login_succeeded', {
@@ -282,7 +300,13 @@ export class AuthService {
 
       const user = await tx.user.findUnique({
         where: { id: resetToken.userId },
-        select: { id: true, email: true, password: true, isActive: true },
+        select: {
+          id: true,
+          email: true,
+          password: true,
+          isActive: true,
+          organizationId: true,
+        },
       });
 
       if (!user || !user.isActive) {
@@ -314,6 +338,16 @@ export class AuthService {
         },
         data: { usedAt: now },
       });
+      await this.auditService.record(
+        {
+          organizationId: user.organizationId,
+          actorUserId: user.id,
+          action: AUDIT_ACTIONS.AUTH_PASSWORD_RESET,
+          entityType: AUDIT_ENTITY_TYPES.USER,
+          entityId: user.id,
+        },
+        tx,
+      );
       resetUser = user;
     });
 
@@ -328,32 +362,43 @@ export class AuthService {
   }
 
   async changePassword(userId: string, dto: ChangePasswordDto) {
-    const user = await this.prisma.user.findUnique({
-      where: { id: userId },
-      select: { id: true, email: true, password: true },
-    });
+    const changedUser = await this.prisma.$transaction(async (tx) => {
+      // Wait for any concurrent password change, then validate against the
+      // latest committed hash while keeping the row locked until audit commit.
+      await tx.$queryRaw`
+        SELECT "id" FROM "User" WHERE "id" = ${userId} FOR UPDATE
+      `;
 
-    if (!user) {
-      throw new UnauthorizedException('Sessão inválida');
-    }
+      const user = await tx.user.findUnique({
+        where: { id: userId },
+        select: {
+          id: true,
+          email: true,
+          password: true,
+          organizationId: true,
+        },
+      });
 
-    if (!(await bcrypt.compare(dto.currentPassword, user.password))) {
-      this.warnSecurityEvent('auth_change_password_failed', { userId });
-      throw new UnauthorizedException('Senha atual inválida');
-    }
+      if (!user) {
+        throw new UnauthorizedException('Sessão inválida');
+      }
 
-    assertStrongPassword(dto.newPassword, user.email);
+      if (!(await bcrypt.compare(dto.currentPassword, user.password))) {
+        this.warnSecurityEvent('auth_change_password_failed', { userId });
+        throw new UnauthorizedException('Senha atual inválida');
+      }
 
-    if (await bcrypt.compare(dto.newPassword, user.password)) {
-      throw new BadRequestException(
-        'A nova senha não pode ser igual à senha atual.',
-      );
-    }
+      assertStrongPassword(dto.newPassword, user.email);
 
-    const password = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
-    const now = new Date();
+      if (await bcrypt.compare(dto.newPassword, user.password)) {
+        throw new BadRequestException(
+          'A nova senha não pode ser igual à senha atual.',
+        );
+      }
 
-    await this.prisma.$transaction(async (tx) => {
+      const password = await bcrypt.hash(dto.newPassword, BCRYPT_ROUNDS);
+      const now = new Date();
+
       await tx.user.update({
         where: { id: user.id },
         data: {
@@ -365,11 +410,23 @@ export class AuthService {
         where: { userId: user.id, usedAt: null },
         data: { usedAt: now },
       });
+      await this.auditService.record(
+        {
+          organizationId: user.organizationId,
+          actorUserId: user.id,
+          action: AUDIT_ACTIONS.AUTH_PASSWORD_CHANGED,
+          entityType: AUDIT_ENTITY_TYPES.USER,
+          entityId: user.id,
+        },
+        tx,
+      );
+
+      return { id: user.id, email: user.email };
     });
 
     this.logSecurityEvent('auth_password_changed', {
-      userId: user.id,
-      emailFingerprint: emailFingerprint(user.email),
+      userId: changedUser.id,
+      emailFingerprint: emailFingerprint(changedUser.email),
     });
 
     return { message: 'Senha alterada com sucesso. Faça login novamente.' };

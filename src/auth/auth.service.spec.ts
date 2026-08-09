@@ -7,6 +7,7 @@ import * as bcrypt from 'bcryptjs';
 import { AuthService } from './auth.service';
 import { hashPasswordResetToken } from './password-reset-token.utils';
 import type { PasswordResetNotification } from './password-reset-notifier';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 
 describe('AuthService', () => {
   let prisma: any;
@@ -14,6 +15,7 @@ describe('AuthService', () => {
   let jwtService: { sign: jest.Mock };
   let notifier: { sendPasswordReset: jest.Mock };
   let invitationsService: { accept: jest.Mock };
+  let auditService: { record: jest.Mock };
   let service: AuthService;
 
   const makeUser = (overrides: Record<string, unknown> = {}) => ({
@@ -63,6 +65,7 @@ describe('AuthService', () => {
     jwtService = { sign: jest.fn().mockReturnValue('signed-token') };
     notifier = { sendPasswordReset: jest.fn().mockResolvedValue(undefined) };
     invitationsService = { accept: jest.fn() };
+    auditService = { record: jest.fn().mockResolvedValue({ id: 'audit-1' }) };
     const configService = {
       get: jest.fn((key: string) => {
         if (key === 'PASSWORD_RESET_FRONTEND_URL') {
@@ -78,6 +81,7 @@ describe('AuthService', () => {
       configService,
       notifier,
       invitationsService as any,
+      auditService as any,
     );
   });
 
@@ -87,7 +91,7 @@ describe('AuthService', () => {
       password: await bcrypt.hash('harpia123', 10),
     });
     prisma.user.findFirst.mockResolvedValue(seedUser);
-    prisma.user.update.mockResolvedValue(seedUser);
+    transaction.user.update.mockResolvedValue(seedUser);
 
     await expect(
       service.login({ email: ' Admin@Harpia.com ', password: 'harpia123' }),
@@ -104,11 +108,21 @@ describe('AuthService', () => {
       tokenVersion: 0,
       role: UserRole.OWNER,
     });
-    expect(prisma.user.update).toHaveBeenCalledWith(
+    expect(transaction.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'user-1' },
         data: { lastLoginAt: expect.any(Date) },
       }),
+    );
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'organization-1',
+        actorUserId: 'user-1',
+        action: AUDIT_ACTIONS.AUTH_LOGIN,
+        entityType: AUDIT_ENTITY_TYPES.AUTH_SESSION,
+        entityId: 'user-1',
+      },
+      transaction,
     );
   });
 
@@ -127,6 +141,7 @@ describe('AuthService', () => {
     ).rejects.toMatchObject<Partial<UnauthorizedException>>({
       message: 'Credenciais inválidas',
     });
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 
   it('rejects inactive accounts with the generic login error', async () => {
@@ -145,7 +160,8 @@ describe('AuthService', () => {
     ).rejects.toMatchObject<Partial<UnauthorizedException>>({
       message: 'Credenciais inválidas',
     });
-    expect(prisma.user.update).not.toHaveBeenCalled();
+    expect(transaction.user.update).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 
   it('enforces the policy, serializes normalized registration and signs tokenVersion', async () => {
@@ -248,6 +264,7 @@ describe('AuthService', () => {
     await expect(
       service.forgotPassword({ email: 'missing@example.com' }),
     ).resolves.toEqual(response);
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 
   it('atomically applies a reset, revokes previous JWTs and invalidates sibling tokens', async () => {
@@ -278,6 +295,16 @@ describe('AuthService', () => {
         }),
       }),
     );
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'organization-1',
+        actorUserId: 'user-1',
+        action: AUDIT_ACTIONS.AUTH_PASSWORD_RESET,
+        entityType: AUDIT_ENTITY_TYPES.USER,
+        entityId: 'user-1',
+      },
+      transaction,
+    );
     expect(transaction.user.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ tokenVersion: { increment: 1 } }),
@@ -299,7 +326,7 @@ describe('AuthService', () => {
     });
 
     const password = await bcrypt.hash('SenhaAtual1!', 10);
-    prisma.user.findUnique.mockResolvedValue(makeUser({ password }));
+    transaction.user.findUnique.mockResolvedValue(makeUser({ password }));
     await expect(
       service.changePassword('user-1', {
         currentPassword: 'SenhaAtual1!',
@@ -328,7 +355,7 @@ describe('AuthService', () => {
   });
 
   it('does not change a password when the authenticated current password is wrong', async () => {
-    prisma.user.findUnique.mockResolvedValue(
+    transaction.user.findUnique.mockResolvedValue(
       makeUser({ password: await bcrypt.hash('SenhaAtual1!', 10) }),
     );
 
@@ -338,12 +365,37 @@ describe('AuthService', () => {
         newPassword: 'SenhaNova1!',
       }),
     ).rejects.toBeInstanceOf(UnauthorizedException);
-    expect(prisma.$transaction).not.toHaveBeenCalled();
+    expect(prisma.$transaction).toHaveBeenCalledTimes(1);
+    expect(transaction.user.update).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
+  });
+
+  it('rechecks the current hash after locking out a concurrent password change', async () => {
+    prisma.user.findUnique.mockResolvedValue(
+      makeUser({ password: await bcrypt.hash('SenhaAtual1!', 10) }),
+    );
+    transaction.user.findUnique.mockResolvedValue(
+      makeUser({ password: await bcrypt.hash('SenhaConcorrente1!', 10) }),
+    );
+
+    await expect(
+      service.changePassword('user-1', {
+        currentPassword: 'SenhaAtual1!',
+        newPassword: 'SenhaNova1!',
+      }),
+    ).rejects.toBeInstanceOf(UnauthorizedException);
+
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(transaction.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      transaction.user.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(transaction.user.update).not.toHaveBeenCalled();
+    expect(auditService.record).not.toHaveBeenCalled();
   });
 
   it('changes the password only after validating the current password and invalidates reset tokens', async () => {
     const user = makeUser({ password: await bcrypt.hash('SenhaAtual1!', 10) });
-    prisma.user.findUnique.mockResolvedValue(user);
+    transaction.user.findUnique.mockResolvedValue(user);
 
     await expect(
       service.changePassword('user-1', {
@@ -362,5 +414,37 @@ describe('AuthService', () => {
     expect(transaction.passwordResetToken.updateMany).toHaveBeenCalledWith(
       expect.objectContaining({ where: { userId: 'user-1', usedAt: null } }),
     );
+    expect(auditService.record).toHaveBeenCalledWith(
+      {
+        organizationId: 'organization-1',
+        actorUserId: 'user-1',
+        action: AUDIT_ACTIONS.AUTH_PASSWORD_CHANGED,
+        entityType: AUDIT_ENTITY_TYPES.USER,
+        entityId: 'user-1',
+      },
+      transaction,
+    );
+    expect(prisma.user.findUnique).not.toHaveBeenCalled();
+    expect(transaction.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      transaction.user.findUnique.mock.invocationCallOrder[0],
+    );
+    expect(
+      transaction.user.findUnique.mock.invocationCallOrder[0],
+    ).toBeLessThan(transaction.user.update.mock.invocationCallOrder[0]);
+  });
+
+  it('keeps password mutation and audit in one transaction boundary', async () => {
+    const user = makeUser({ password: await bcrypt.hash('SenhaAtual1!', 10) });
+    transaction.user.findUnique.mockResolvedValue(user);
+    auditService.record.mockRejectedValue(new Error('audit unavailable'));
+
+    await expect(
+      service.changePassword('user-1', {
+        currentPassword: 'SenhaAtual1!',
+        newPassword: 'SenhaNova1!',
+      }),
+    ).rejects.toThrow('audit unavailable');
+
+    expect(auditService.record.mock.calls[0][1]).toBe(transaction);
   });
 });

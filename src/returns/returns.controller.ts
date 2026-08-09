@@ -51,7 +51,10 @@ export class ReturnsController {
   @RequirePermissions(PERMISSIONS.RETURNS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateReturnDto) {
-    return this.returnsService.create(user.organizationId, dto);
+    return this.returnsService.create(
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.RETURNS_WRITE)
@@ -61,12 +64,19 @@ export class ReturnsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateReturnDto,
   ) {
-    return this.returnsService.update(id, user.organizationId, dto);
+    return this.returnsService.update(
+      id,
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.RETURNS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.returnsService.remove(id, user.organizationId);
+    return this.returnsService.remove(id, {
+      id: user.id,
+      organizationId: user.organizationId,
+    });
   }
 }

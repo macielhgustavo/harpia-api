@@ -1,5 +1,7 @@
 import { Controller, Get, Query, Res } from '@nestjs/common';
 import type { Response } from 'express';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import { AuditService } from '../audit/audit.service';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../auth/permissions/permissions';
 import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
@@ -15,10 +17,22 @@ interface AuthUser {
   organizationId: string;
 }
 
+interface ReportAuditFilters {
+  startDate?: string;
+  endDate?: string;
+  asOfDate?: string;
+  developmentId?: string;
+  investorId?: string;
+  status?: string;
+}
+
 @RequirePermissions(PERMISSIONS.REPORTS_EXPORT)
 @Controller('reports')
 export class ReportsController {
-  constructor(private readonly reportsService: ReportsService) {}
+  constructor(
+    private readonly reportsService: ReportsService,
+    private readonly auditService: AuditService,
+  ) {}
 
   @Get('captations')
   async captations(
@@ -30,6 +44,12 @@ export class ReportsController {
       user.organizationId,
       query,
     );
+    await this.recordExport(user, 'captations', query.format, {
+      startDate: query.startDate,
+      endDate: query.endDate,
+      developmentId: query.developmentId,
+      investorId: query.investorId,
+    });
     this.send(response, report, 'captacoes');
   }
 
@@ -43,6 +63,13 @@ export class ReportsController {
       user.organizationId,
       query,
     );
+    await this.recordExport(user, 'returns', query.format, {
+      startDate: query.startDate,
+      endDate: query.endDate,
+      developmentId: query.developmentId,
+      investorId: query.investorId,
+      status: query.status,
+    });
     this.send(response, report, 'retornos');
   }
 
@@ -56,6 +83,11 @@ export class ReportsController {
       user.organizationId,
       query,
     );
+    await this.recordExport(user, 'overdue-returns', query.format, {
+      asOfDate: query.asOfDate,
+      developmentId: query.developmentId,
+      investorId: query.investorId,
+    });
     this.send(response, report, 'retornos-em-atraso');
   }
 
@@ -69,7 +101,27 @@ export class ReportsController {
       user.organizationId,
       query,
     );
+    await this.recordExport(user, 'investor-positions', query.format, {
+      developmentId: query.developmentId,
+      investorId: query.investorId,
+    });
     this.send(response, report, 'posicao-por-investidor');
+  }
+
+  private recordExport(
+    user: AuthUser,
+    reportType: string,
+    format: string,
+    filters: ReportAuditFilters,
+  ) {
+    return this.auditService.record({
+      organizationId: user.organizationId,
+      actorUserId: user.id,
+      action: AUDIT_ACTIONS.REPORT_EXPORTED,
+      entityType: AUDIT_ENTITY_TYPES.REPORT,
+      entityId: reportType,
+      metadata: { reportType, format, filters },
+    });
   }
 
   private send(

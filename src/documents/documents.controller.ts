@@ -63,7 +63,7 @@ export class DocumentsController {
   ) {
     const download = await this.documentsService.download(
       id,
-      user.organizationId,
+      user,
       hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
     );
 
@@ -109,7 +109,7 @@ export class DocumentsController {
     @UploadedFile() file: Express.Multer.File,
   ) {
     return this.documentsService.create(
-      user.organizationId,
+      user,
       dto,
       file,
       hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
@@ -121,7 +121,7 @@ export class DocumentsController {
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.documentsService.remove(
       id,
-      user.organizationId,
+      user,
       hasPermission(user.role, PERMISSIONS.INVESTMENTS_READ),
     );
   }

@@ -47,7 +47,10 @@ export class AllocationsController {
   @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateAllocationDto) {
-    return this.allocationsService.create(user.organizationId, dto);
+    return this.allocationsService.create(
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
@@ -57,12 +60,19 @@ export class AllocationsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateAllocationDto,
   ) {
-    return this.allocationsService.update(id, user.organizationId, dto);
+    return this.allocationsService.update(
+      id,
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.allocationsService.remove(id, user.organizationId);
+    return this.allocationsService.remove(id, {
+      id: user.id,
+      organizationId: user.organizationId,
+    });
   }
 }

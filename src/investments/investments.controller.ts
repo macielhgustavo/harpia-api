@@ -42,7 +42,10 @@ export class InvestmentsController {
   @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateInvestmentDto) {
-    return this.investmentsService.create(user.organizationId, dto);
+    return this.investmentsService.create(
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
@@ -52,12 +55,19 @@ export class InvestmentsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateInvestmentDto,
   ) {
-    return this.investmentsService.update(id, user.organizationId, dto);
+    return this.investmentsService.update(
+      id,
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.INVESTMENTS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.investmentsService.remove(id, user.organizationId);
+    return this.investmentsService.remove(id, {
+      id: user.id,
+      organizationId: user.organizationId,
+    });
   }
 }

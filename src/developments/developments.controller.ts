@@ -56,7 +56,10 @@ export class DevelopmentsController {
   @RequirePermissions(PERMISSIONS.DEVELOPMENTS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateDevelopmentDto) {
-    return this.developmentsService.create(user.organizationId, dto);
+    return this.developmentsService.create(
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.DEVELOPMENTS_WRITE)
@@ -66,12 +69,19 @@ export class DevelopmentsController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateDevelopmentDto,
   ) {
-    return this.developmentsService.update(id, user.organizationId, dto);
+    return this.developmentsService.update(
+      id,
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.DEVELOPMENTS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.developmentsService.remove(id, user.organizationId);
+    return this.developmentsService.remove(id, {
+      id: user.id,
+      organizationId: user.organizationId,
+    });
   }
 }

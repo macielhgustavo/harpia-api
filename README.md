@@ -174,7 +174,7 @@ The centralized permission matrix currently applies these profiles:
 
 | Role | Access profile |
 | --- | --- |
-| `OWNER` | Every permission, including users, future audit, financial data and exports. |
+| `OWNER` | Every permission, including users, audit, financial data and exports. |
 | `ADMIN` | Every permission, but cannot change an `OWNER` or grant the `OWNER` role. |
 | `FINANCEIRO` | Operational reads plus bank-account, investment and return writes, financial dashboard and report exports. |
 | `COMERCIAL` | People writes, operational reads, document/interaction writes and the reserved CRM/sales permissions. |
@@ -223,6 +223,38 @@ notifier payload after the invitation transaction commits. The default notifier
 is intentionally no-op and logs only sanitized IDs and an e-mail fingerprint;
 therefore production does not send invitations until a delivery provider is
 configured behind `USER_INVITATION_NOTIFIER`.
+
+## Audit logging
+
+Security and business mutations create append-only `AuditLog` records scoped
+to the authenticated organization. Database-backed mutations and their audit
+records share the same Prisma transaction, so either both commit or neither
+does. Successful logins, password changes/resets, invitations, user role and
+status changes, companies, developments, units, price tables and unit prices,
+investments, allocations, returns, private-document operations and report
+exports are covered.
+
+Audit metadata is deliberately allowlisted by each caller and is passed through
+a recursive size-bounded sanitizer. Keys related to passwords, JWTs, tokens,
+hashes, secrets, authorization headers, cookies, files, binary content and
+whole requests are removed before persistence. Document names, object keys and
+contents are never stored in audit metadata.
+
+Both endpoints require the `AUDIT_READ` permission and always add the active
+organization to their database predicate:
+
+| Endpoint | Query parameters | Behavior |
+| --- | --- | --- |
+| `GET /audit-logs` | `action`, `entityType`, `entityId`, `actorUserId`, `startDate`, `endDate`, `page`, `pageSize` | Returns newest-first results plus pagination metadata. The default page size is 20 and the maximum is 100. |
+| `GET /audit-logs/:id` | none | Returns one record from the active organization or a tenant-safe 404. |
+
+There are intentionally no HTTP endpoints to update or delete audit records.
+
+The action and entity names for sales, sale cancellations and financial
+transactions are reserved now, but those events are intentionally wired only
+when their corresponding domain models are introduced in roadmap phases 24,
+26 and 27. The current schema has no `Sale`, `SaleCancellation` or
+`FinancialTransaction` records to audit yet.
 
 ## Private document storage
 

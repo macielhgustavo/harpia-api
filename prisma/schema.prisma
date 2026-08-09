@@ -33,6 +33,7 @@ model Organization {
   documents    Document[]
   interactions Interaction[]
   invitations  UserInvitation[]
+  auditLogs    AuditLog[]
 }
 
 // ---------------------------------------------------------------------------
@@ -56,6 +57,7 @@ model User {
   person              Person?              @relation(fields: [personId], references: [id], onDelete: SetNull)
   passwordResetTokens PasswordResetToken[]
   invitationsSent     UserInvitation[]     @relation("UserInvitationInvitedBy")
+  auditLogs           AuditLog[]
   createdAt           DateTime             @default(now())
   updatedAt           DateTime             @updatedAt
 
@@ -96,6 +98,28 @@ model PasswordResetToken {
 
   @@index([userId])
   @@index([expiresAt])
+}
+
+// ---------------------------------------------------------------------------
+// Auditoria imutavel na camada de aplicacao
+// ---------------------------------------------------------------------------
+
+model AuditLog {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  actorUserId    String?
+  actor          User?        @relation(fields: [actorUserId], references: [id], onDelete: SetNull)
+  action         String
+  entityType     String
+  entityId       String?
+  metadata       Json?
+  createdAt      DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, action, createdAt])
+  @@index([organizationId, entityType, entityId])
+  @@index([actorUserId, createdAt])
 }
 
 // ---------------------------------------------------------------------------

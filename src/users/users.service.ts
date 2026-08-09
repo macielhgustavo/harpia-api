@@ -9,6 +9,8 @@ import { Prisma, UserRole } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { ListUsersQueryDto } from './dto/list-users-query.dto';
 import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import { AuditService } from '../audit/audit.service';
 
 const SAFE_USER_SELECT = {
   id: true,
@@ -32,7 +34,10 @@ interface UserActor {
 
 @Injectable()
 export class UsersService {
-  constructor(private readonly prisma: PrismaService) {}
+  constructor(
+    private readonly prisma: PrismaService,
+    private readonly auditService: AuditService,
+  ) {}
 
   findAll(organizationId: string, query: ListUsersQueryDto) {
     const search = query.search?.trim();
@@ -91,7 +96,7 @@ export class UsersService {
         await this.assertAnotherActiveOwner(tx, actor.organizationId, id);
       }
 
-      return tx.user.update({
+      const updatedUser = await tx.user.update({
         where: { id },
         data: {
           role,
@@ -99,6 +104,23 @@ export class UsersService {
         },
         select: SAFE_USER_SELECT,
       });
+
+      await this.auditService.record(
+        {
+          organizationId: actor.organizationId,
+          actorUserId: actor.id,
+          action: AUDIT_ACTIONS.USER_ROLE_CHANGED,
+          entityType: AUDIT_ENTITY_TYPES.USER,
+          entityId: id,
+          metadata: {
+            oldRole: target.role,
+            newRole: role,
+          },
+        },
+        tx,
+      );
+
+      return updatedUser;
     });
   }
 
@@ -123,7 +145,7 @@ export class UsersService {
         await this.assertAnotherActiveOwner(tx, actor.organizationId, id);
       }
 
-      return tx.user.update({
+      const updatedUser = await tx.user.update({
         where: { id },
         data: {
           isActive,
@@ -131,6 +153,25 @@ export class UsersService {
         },
         select: SAFE_USER_SELECT,
       });
+
+      await this.auditService.record(
+        {
+          organizationId: actor.organizationId,
+          actorUserId: actor.id,
+          action: isActive
+            ? AUDIT_ACTIONS.USER_ACTIVATED
+            : AUDIT_ACTIONS.USER_DEACTIVATED,
+          entityType: AUDIT_ENTITY_TYPES.USER,
+          entityId: id,
+          metadata: {
+            oldIsActive: target.isActive,
+            newIsActive: isActive,
+          },
+        },
+        tx,
+      );
+
+      return updatedUser;
     });
   }
 

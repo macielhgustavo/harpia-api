@@ -22,6 +22,7 @@ import { ReportsModule } from './reports/reports.module';
 import { JwtAuthGuard } from './auth/guards/jwt-auth.guard';
 import { PermissionsGuard } from './auth/permissions/permissions.guard';
 import { UsersModule } from './users/users.module';
+import { AuditModule } from './audit/audit.module';
 
 @Module({
   imports: [
@@ -43,6 +44,7 @@ import { UsersModule } from './users/users.module';
     DashboardModule,
     ReportsModule,
     UsersModule,
+    AuditModule,
   ],
   controllers: [AppController],
   providers: [

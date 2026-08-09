@@ -1,12 +1,17 @@
 import { ReturnStatus } from '@prisma/client';
 import {
   IsDateString,
-  IsEnum,
+  IsIn,
   IsNumber,
   IsOptional,
   IsPositive,
   IsString,
 } from 'class-validator';
+
+const PERSISTED_RETURN_STATUSES: ReturnStatus[] = [
+  ReturnStatus.PENDENTE,
+  ReturnStatus.PAGO,
+];
 
 export class CreateReturnDto {
   @IsString()
@@ -29,6 +34,6 @@ export class CreateReturnDto {
   realizedAmount?: number;
 
   @IsOptional()
-  @IsEnum(ReturnStatus)
+  @IsIn(PERSISTED_RETURN_STATUSES)
   status?: ReturnStatus;
 }

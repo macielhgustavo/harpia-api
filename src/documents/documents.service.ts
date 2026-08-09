@@ -3,10 +3,13 @@ import {
   ForbiddenException,
   Inject,
   Injectable,
+  Logger,
   NotFoundException,
 } from '@nestjs/common';
 import { Prisma } from '@prisma/client';
 import { randomUUID } from 'crypto';
+import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
+import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { StorageRegistry } from '../storage/storage.registry';
 import {
@@ -36,6 +39,11 @@ interface DocumentFilters {
   developmentId?: string;
 }
 
+interface MutationActor {
+  id: string;
+  organizationId: string;
+}
+
 type DocumentDownload = StorageDownload & {
   originalName: string;
   mimeType: string;
@@ -43,10 +51,13 @@ type DocumentDownload = StorageDownload & {
 
 @Injectable()
 export class DocumentsService {
+  private readonly logger = new Logger(DocumentsService.name);
+
   constructor(
     private readonly prisma: PrismaService,
     @Inject(StorageService) private readonly defaultStorage: StorageService,
     private readonly storageRegistry: StorageRegistry,
+    private readonly auditService: AuditService,
   ) {}
 
   async findAll(
@@ -95,7 +106,7 @@ export class DocumentsService {
   }
 
   async create(
-    organizationId: string,
+    actor: MutationActor,
     dto: CreateDocumentDto,
     file: Express.Multer.File,
     includeFinancialData = false,
@@ -106,7 +117,7 @@ export class DocumentsService {
         'Você não tem permissão para vincular documentos a investimentos.',
       );
     }
-    await this.assertLinksInOrg(dto, organizationId);
+    await this.assertLinksInOrg(dto, actor.organizationId);
 
     const id = randomUUID();
     const storageKey = `documents/${randomUUID()}.${validatedFile.extension}`;
@@ -118,25 +129,47 @@ export class DocumentsService {
     });
 
     try {
-      const document = await this.prisma.document.create({
-        data: {
-          id,
-          organizationId,
-          name: dto.name,
-          // Preserved for old consumers, but it now resolves through JWT.
-          fileUrl: documentDownloadPath(id),
-          storageKey,
-          storageProvider: this.defaultStorage.provider,
-          originalName: file.originalname || 'document',
-          mimeType: validatedFile.mimeType,
-          size: file.size,
-          category: dto.category,
-          personId: dto.personId,
-          investmentId: dto.investmentId,
-          unitId: dto.unitId,
-          developmentId: dto.developmentId,
-        },
-        include: getDocumentInclude(includeFinancialData),
+      const document = await this.prisma.$transaction(async (tx) => {
+        const createdDocument = await tx.document.create({
+          data: {
+            id,
+            organizationId: actor.organizationId,
+            name: dto.name,
+            // Preserved for old consumers, but it now resolves through JWT.
+            fileUrl: documentDownloadPath(id),
+            storageKey,
+            storageProvider: this.defaultStorage.provider,
+            originalName: file.originalname || 'document',
+            mimeType: validatedFile.mimeType,
+            size: file.size,
+            category: dto.category,
+            personId: dto.personId,
+            investmentId: dto.investmentId,
+            unitId: dto.unitId,
+            developmentId: dto.developmentId,
+          },
+          include: getDocumentInclude(includeFinancialData),
+        });
+
+        await this.auditService.record(
+          {
+            organizationId: actor.organizationId,
+            actorUserId: actor.id,
+            action: AUDIT_ACTIONS.DOCUMENT_UPLOADED,
+            entityType: AUDIT_ENTITY_TYPES.DOCUMENT,
+            entityId: createdDocument.id,
+            metadata: {
+              category: createdDocument.category,
+              personId: createdDocument.personId,
+              investmentId: createdDocument.investmentId,
+              unitId: createdDocument.unitId,
+              developmentId: createdDocument.developmentId,
+            },
+          },
+          tx,
+        );
+
+        return createdDocument;
       });
       return presentDocument(document);
     } catch (error) {
@@ -144,8 +177,21 @@ export class DocumentsService {
       // Cleanup must not hide the original database error.
       try {
         await this.defaultStorage.delete(storageKey);
-      } catch {
-        // A cleanup failure is not actionable without masking the DB failure.
+      } catch (cleanupError) {
+        // Preserve the original DB failure, but make a retained private object
+        // observable without logging its object key, name or contents.
+        this.logger.error(
+          JSON.stringify({
+            event: 'document_storage_compensation_failed',
+            documentId: id,
+            organizationId: actor.organizationId,
+            storageProvider: this.defaultStorage.provider,
+            errorName:
+              cleanupError instanceof Error
+                ? cleanupError.name
+                : 'UnknownStorageError',
+          }),
+        );
       }
       throw error;
     }
@@ -153,13 +199,13 @@ export class DocumentsService {
 
   async download(
     id: string,
-    organizationId: string,
+    actor: MutationActor,
     includeFinancialData = false,
   ): Promise<DocumentDownload> {
     const document = await this.prisma.document.findFirst({
       where: {
         id,
-        organizationId,
+        organizationId: actor.organizationId,
         ...(includeFinancialData ? {} : { investmentId: null }),
       },
     });
@@ -171,6 +217,13 @@ export class DocumentsService {
         key: document.storageKey,
         originalName: document.originalName,
         mimeType: document.mimeType,
+      });
+      await this.auditService.record({
+        organizationId: actor.organizationId,
+        actorUserId: actor.id,
+        action: AUDIT_ACTIONS.DOCUMENT_DOWNLOADED,
+        entityType: AUDIT_ENTITY_TYPES.DOCUMENT,
+        entityId: document.id,
       });
       return {
         ...download,
@@ -185,15 +238,11 @@ export class DocumentsService {
     }
   }
 
-  async remove(
-    id: string,
-    organizationId: string,
-    includeFinancialData = false,
-  ) {
+  async remove(id: string, actor: MutationActor, includeFinancialData = false) {
     const document = await this.prisma.document.findFirst({
       where: {
         id,
-        organizationId,
+        organizationId: actor.organizationId,
         ...(includeFinancialData ? {} : { investmentId: null }),
       },
     });
@@ -206,9 +255,24 @@ export class DocumentsService {
       if (!(error instanceof StorageObjectNotFoundError)) throw error;
     }
 
-    const deletedDocument = await this.prisma.document.delete({
-      where: { id },
+    // Deleting storage first preserves the endpoint's failure contract and
+    // avoids acknowledging deletion while retaining private bytes. If the DB
+    // transaction fails, a retry is safe because missing objects are accepted.
+    const deletedDocument = await this.prisma.$transaction(async (tx) => {
+      const deleted = await tx.document.delete({ where: { id } });
+      await this.auditService.record(
+        {
+          organizationId: actor.organizationId,
+          actorUserId: actor.id,
+          action: AUDIT_ACTIONS.DOCUMENT_DELETED,
+          entityType: AUDIT_ENTITY_TYPES.DOCUMENT,
+          entityId: deleted.id,
+        },
+        tx,
+      );
+      return deleted;
     });
+
     return presentDocument(deletedDocument);
   }
 
