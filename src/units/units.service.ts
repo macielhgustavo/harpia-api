@@ -137,6 +137,32 @@ export class UnitsService {
       (field) => dto[field] !== undefined,
     );
     return this.prisma.$transaction(async (tx) => {
+      let preflightDevelopmentId: string | undefined;
+      if (typeof dto.unitTypeId === 'string') {
+        const preflightUnit = await tx.unit.findFirst({
+          where: { id, organizationId: actor.organizationId },
+          select: { id: true, developmentId: true },
+        });
+        if (!preflightUnit) {
+          throw new NotFoundException('Unidade não encontrada');
+        }
+        preflightDevelopmentId = preflightUnit.developmentId;
+
+        const [unitType] = await tx.$queryRaw<{ id: string }[]>`
+          SELECT "id"
+          FROM "UnitType"
+          WHERE "id" = ${dto.unitTypeId}
+            AND "organizationId" = ${actor.organizationId}
+            AND "developmentId" = ${preflightUnit.developmentId}
+          FOR KEY SHARE
+        `;
+        if (!unitType) {
+          throw new BadRequestException(
+            'Tipologia inválida para este empreendimento',
+          );
+        }
+      }
+
       const [unit] = await tx.$queryRaw<LockedUnitState[]>`
         SELECT "id", "developmentId", "status"
         FROM "Unit"
@@ -145,20 +171,13 @@ export class UnitsService {
       `;
       if (!unit) throw new NotFoundException('Unidade não encontrada');
 
-      if (dto.unitTypeId) {
-        const unitType = await tx.unitType.findFirst({
-          where: {
-            id: dto.unitTypeId,
-            organizationId: actor.organizationId,
-            developmentId: unit.developmentId,
-          },
-          select: { id: true },
-        });
-        if (!unitType) {
-          throw new BadRequestException(
-            'Tipologia inválida para este empreendimento',
-          );
-        }
+      if (
+        preflightDevelopmentId !== undefined &&
+        unit.developmentId !== preflightDevelopmentId
+      ) {
+        throw new BadRequestException(
+          'Tipologia inválida para este empreendimento',
+        );
       }
 
       const statusChange =

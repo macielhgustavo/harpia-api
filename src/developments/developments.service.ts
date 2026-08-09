@@ -19,6 +19,12 @@ interface MutationActor {
 interface LockedDevelopmentState {
   id: string;
   status: DevelopmentStatus;
+  expectedLaunchDate: Date | null;
+  expectedDeliveryDate: Date | null;
+}
+
+interface CascadedUnitTypeState {
+  id: string;
 }
 
 const DEVELOPMENT_UPDATE_FIELDS: (keyof UpdateDevelopmentDto)[] = [
@@ -87,6 +93,10 @@ export class DevelopmentsService {
   }
 
   async create(actor: MutationActor, dto: CreateDevelopmentDto) {
+    this.assertExpectedDateOrder(
+      dto.expectedLaunchDate,
+      dto.expectedDeliveryDate,
+    );
     if (dto.companyId) {
       await this.assertCompanyInOrg(dto.companyId, actor.organizationId);
     }
@@ -134,7 +144,7 @@ export class DevelopmentsService {
     );
     return this.prisma.$transaction(async (tx) => {
       const [existing] = await tx.$queryRaw<LockedDevelopmentState[]>`
-        SELECT "id", "status"
+        SELECT "id", "status", "expectedLaunchDate", "expectedDeliveryDate"
         FROM "Development"
         WHERE "id" = ${id} AND "organizationId" = ${actor.organizationId}
         FOR UPDATE
@@ -147,6 +157,15 @@ export class DevelopmentsService {
         dto.status !== undefined && dto.status !== existing.status
           ? { oldStatus: existing.status, newStatus: dto.status }
           : {};
+      const effectiveLaunchDate = this.resolveExpectedDate(
+        dto.expectedLaunchDate,
+        existing.expectedLaunchDate,
+      );
+      const effectiveDeliveryDate = this.resolveExpectedDate(
+        dto.expectedDeliveryDate,
+        existing.expectedDeliveryDate,
+      );
+      this.assertExpectedDateOrder(effectiveLaunchDate, effectiveDeliveryDate);
       const development = await tx.development.update({
         where: { id },
         data: {
@@ -157,12 +176,18 @@ export class DevelopmentsService {
           address: dto.address,
           city: dto.city,
           status: dto.status,
-          expectedLaunchDate: dto.expectedLaunchDate
-            ? new Date(dto.expectedLaunchDate)
-            : undefined,
-          expectedDeliveryDate: dto.expectedDeliveryDate
-            ? new Date(dto.expectedDeliveryDate)
-            : undefined,
+          expectedLaunchDate:
+            dto.expectedLaunchDate === undefined
+              ? undefined
+              : dto.expectedLaunchDate === null
+                ? null
+                : new Date(dto.expectedLaunchDate),
+          expectedDeliveryDate:
+            dto.expectedDeliveryDate === undefined
+              ? undefined
+              : dto.expectedDeliveryDate === null
+                ? null
+                : new Date(dto.expectedDeliveryDate),
         },
       });
       await this.audit.record(
@@ -202,6 +227,13 @@ export class DevelopmentsService {
       }
 
       // Os locks dos filhos impedem novos UnitPrices durante a coleta.
+      const cascadedUnitTypes = await tx.$queryRaw<CascadedUnitTypeState[]>`
+        SELECT "id"
+        FROM "UnitType"
+        WHERE "developmentId" = ${id}
+          AND "organizationId" = ${actor.organizationId}
+        FOR UPDATE
+      `;
       const cascadedUnits = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id"
         FROM "Unit"
@@ -251,6 +283,14 @@ export class DevelopmentsService {
             entityId: unit.id,
             metadata: { cascadeSource },
           })),
+          ...cascadedUnitTypes.map((unitType) => ({
+            organizationId: actor.organizationId,
+            actorUserId: actor.id,
+            action: AUDIT_ACTIONS.DELETE,
+            entityType: AUDIT_ENTITY_TYPES.UNIT_TYPE,
+            entityId: unitType.id,
+            metadata: { cascadeSource },
+          })),
           ...cascadedPriceTables.map((priceTable) => ({
             organizationId: actor.organizationId,
             actorUserId: actor.id,
@@ -296,6 +336,29 @@ export class DevelopmentsService {
     });
     if (!company) {
       throw new BadRequestException('Empresa inválida para esta organização');
+    }
+  }
+
+  private resolveExpectedDate(
+    value: string | null | undefined,
+    current: Date | null,
+  ) {
+    if (value === undefined) return current;
+    return value === null ? null : new Date(value);
+  }
+
+  private assertExpectedDateOrder(
+    launch: string | Date | null | undefined,
+    delivery: string | Date | null | undefined,
+  ): void {
+    if (!launch || !delivery) return;
+    const launchDate = launch instanceof Date ? launch : new Date(launch);
+    const deliveryDate =
+      delivery instanceof Date ? delivery : new Date(delivery);
+    if (deliveryDate.getTime() < launchDate.getTime()) {
+      throw new BadRequestException(
+        'A data prevista de entrega deve ser igual ou posterior à data prevista de lançamento',
+      );
     }
   }
 }

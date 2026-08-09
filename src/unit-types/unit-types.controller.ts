@@ -42,7 +42,10 @@ export class UnitTypesController {
   @RequirePermissions(PERMISSIONS.UNITS_WRITE)
   @Post()
   create(@CurrentUser() user: AuthUser, @Body() dto: CreateUnitTypeDto) {
-    return this.unitTypesService.create(user.organizationId, dto);
+    return this.unitTypesService.create(
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.UNITS_WRITE)
@@ -52,12 +55,19 @@ export class UnitTypesController {
     @CurrentUser() user: AuthUser,
     @Body() dto: UpdateUnitTypeDto,
   ) {
-    return this.unitTypesService.update(id, user.organizationId, dto);
+    return this.unitTypesService.update(
+      id,
+      { id: user.id, organizationId: user.organizationId },
+      dto,
+    );
   }
 
   @RequirePermissions(PERMISSIONS.UNITS_WRITE)
   @Delete(':id')
   remove(@Param('id') id: string, @CurrentUser() user: AuthUser) {
-    return this.unitTypesService.remove(id, user.organizationId);
+    return this.unitTypesService.remove(id, {
+      id: user.id,
+      organizationId: user.organizationId,
+    });
   }
 }

@@ -1,3 +1,4 @@
+import { BadRequestException } from '@nestjs/common';
 import { UnitCategory, UnitStatus } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
@@ -122,5 +123,140 @@ describe('UnitsService audit', () => {
     expect(
       transaction.unitPrice.findMany.mock.invocationCallOrder[0],
     ).toBeLessThan(transaction.unit.delete.mock.invocationCallOrder[0]);
+  });
+
+  it('locks a tenant-scoped target type before the unit to avoid delete deadlocks', async () => {
+    const transaction = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'type-2' }])
+        .mockResolvedValueOnce([
+          {
+            id: 'unit-1',
+            developmentId: 'development-1',
+            status: UnitStatus.DISPONIVEL,
+          },
+        ]),
+      unit: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'unit-1',
+          developmentId: 'development-1',
+        }),
+        update: jest.fn().mockResolvedValue({ id: 'unit-1' }),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: typeof transaction) => unknown) =>
+        callback(transaction),
+      ),
+    };
+    const audit = { record: jest.fn().mockResolvedValue({ id: 'audit-1' }) };
+    const service = new UnitsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    await service.update(
+      'unit-1',
+      { id: 'user-1', organizationId: 'org-a' },
+      { unitTypeId: 'type-2' },
+    );
+
+    expect(transaction.unit.findFirst).toHaveBeenCalledWith({
+      where: { id: 'unit-1', organizationId: 'org-a' },
+      select: { id: true, developmentId: true },
+    });
+    const [targetLock, ...targetValues] = transaction.$queryRaw.mock
+      .calls[0] as unknown as [TemplateStringsArray, ...unknown[]];
+    const [unitLock] = transaction.$queryRaw.mock.calls[1] as unknown as [
+      TemplateStringsArray,
+      ...unknown[],
+    ];
+    expect(Array.from(targetLock).join('')).toContain('FROM "UnitType"');
+    expect(targetValues).toEqual(['type-2', 'org-a', 'development-1']);
+    expect(Array.from(unitLock).join('')).toContain('FROM "Unit"');
+    expect(transaction.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
+      transaction.$queryRaw.mock.invocationCallOrder[1],
+    );
+    expect(transaction.$queryRaw.mock.invocationCallOrder[1]).toBeLessThan(
+      transaction.unit.update.mock.invocationCallOrder[0],
+    );
+  });
+
+  it('rejects a target type from another tenant or development before locking the unit', async () => {
+    const transaction = {
+      $queryRaw: jest.fn().mockResolvedValue([]),
+      unit: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'unit-1',
+          developmentId: 'development-1',
+        }),
+        update: jest.fn(),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: typeof transaction) => unknown) =>
+        callback(transaction),
+      ),
+    };
+    const audit = { record: jest.fn() };
+    const service = new UnitsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    await expect(
+      service.update(
+        'unit-1',
+        { id: 'user-1', organizationId: 'org-a' },
+        { unitTypeId: 'type-from-org-b' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+
+    expect(transaction.$queryRaw).toHaveBeenCalledTimes(1);
+    expect(transaction.unit.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+  });
+
+  it('revalidates the immutable development after locking the unit', async () => {
+    const transaction = {
+      $queryRaw: jest
+        .fn()
+        .mockResolvedValueOnce([{ id: 'type-2' }])
+        .mockResolvedValueOnce([
+          {
+            id: 'unit-1',
+            developmentId: 'unexpected-development',
+            status: UnitStatus.DISPONIVEL,
+          },
+        ]),
+      unit: {
+        findFirst: jest.fn().mockResolvedValue({
+          id: 'unit-1',
+          developmentId: 'development-1',
+        }),
+        update: jest.fn(),
+      },
+    };
+    const prisma = {
+      $transaction: jest.fn((callback: (tx: typeof transaction) => unknown) =>
+        callback(transaction),
+      ),
+    };
+    const audit = { record: jest.fn() };
+    const service = new UnitsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    await expect(
+      service.update(
+        'unit-1',
+        { id: 'user-1', organizationId: 'org-a' },
+        { unitTypeId: 'type-2' },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
+    expect(transaction.unit.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
   });
 });
