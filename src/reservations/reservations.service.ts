@@ -111,6 +111,10 @@ export class ReservationsService {
     return reservation;
   }
 
+  normalizeUnit(organizationId: string, unitId: string) {
+    return this.normalizeExpiredUnit(organizationId, unitId);
+  }
+
   async create(actor: MutationActor, dto: CreateReservationDto) {
     const expiresAt = new Date(dto.expiresAt);
     if (expiresAt <= new Date()) {
