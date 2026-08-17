@@ -17,23 +17,28 @@ model Organization {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  users        User[]
-  people       Person[]
-  personRoles  PersonRole[]
-  companies    Company[]
-  bankAccounts BankAccount[]
-  developments Development[]
-  unitTypes    UnitType[]
-  units        Unit[]
-  priceTables  PriceTable[]
-  unitPrices   UnitPrice[]
-  investments  Investment[]
-  allocations  Allocation[]
-  returns      Return[]
-  documents    Document[]
-  interactions Interaction[]
-  invitations  UserInvitation[]
-  auditLogs    AuditLog[]
+  users                   User[]
+  people                  Person[]
+  personRoles             PersonRole[]
+  companies               Company[]
+  bankAccounts            BankAccount[]
+  developments            Development[]
+  unitTypes               UnitType[]
+  units                   Unit[]
+  priceTables             PriceTable[]
+  unitPrices              UnitPrice[]
+  investments             Investment[]
+  allocations             Allocation[]
+  returns                 Return[]
+  documents               Document[]
+  interactions            Interaction[]
+  invitations             UserInvitation[]
+  auditLogs               AuditLog[]
+  salesPipelines          SalesPipeline[]
+  salesStages             SalesStage[]
+  opportunities           Opportunity[]
+  opportunityStageHistory OpportunityStageHistory[]
+  salesActivities         SalesActivity[]
 }
 
 // ---------------------------------------------------------------------------
@@ -41,25 +46,28 @@ model Organization {
 // ---------------------------------------------------------------------------
 
 model User {
-  id                  String               @id @default(cuid())
-  email               String               @unique
-  password            String
-  tokenVersion        Int                  @default(0)
-  role                UserRole             @default(LEITURA)
-  isActive            Boolean              @default(true)
-  lastLoginAt         DateTime?
-  invitedAt           DateTime?
-  acceptedAt          DateTime?
-  name                String
-  organizationId      String
-  organization        Organization         @relation(fields: [organizationId], references: [id])
-  personId            String?
-  person              Person?              @relation(fields: [personId], references: [id], onDelete: SetNull)
-  passwordResetTokens PasswordResetToken[]
-  invitationsSent     UserInvitation[]     @relation("UserInvitationInvitedBy")
-  auditLogs           AuditLog[]
-  createdAt           DateTime             @default(now())
-  updatedAt           DateTime             @updatedAt
+  id                      String                    @id @default(cuid())
+  email                   String                    @unique
+  password                String
+  tokenVersion            Int                       @default(0)
+  role                    UserRole                  @default(LEITURA)
+  isActive                Boolean                   @default(true)
+  lastLoginAt             DateTime?
+  invitedAt               DateTime?
+  acceptedAt              DateTime?
+  name                    String
+  organizationId          String
+  organization            Organization              @relation(fields: [organizationId], references: [id])
+  personId                String?
+  person                  Person?                   @relation(fields: [personId], references: [id], onDelete: SetNull)
+  passwordResetTokens     PasswordResetToken[]
+  invitationsSent         UserInvitation[]          @relation("UserInvitationInvitedBy")
+  auditLogs               AuditLog[]
+  assignedOpportunities   Opportunity[]             @relation("OpportunityAssignedUser")
+  opportunityStageChanges OpportunityStageHistory[] @relation("OpportunityStageChangedBy")
+  assignedSalesActivities SalesActivity[]           @relation("SalesActivityAssignedUser")
+  createdAt               DateTime                  @default(now())
+  updatedAt               DateTime                  @updatedAt
 
   @@index([organizationId, role])
   @@index([organizationId, isActive])
@@ -141,11 +149,13 @@ model Person {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  roles        PersonRole[]
-  users        User[]
-  investments  Investment[]
-  documents    Document[]
-  interactions Interaction[]
+  roles           PersonRole[]
+  users           User[]
+  investments     Investment[]
+  documents       Document[]
+  interactions    Interaction[]
+  opportunities   Opportunity[]
+  salesActivities SalesActivity[]
 
   @@unique([organizationId, document])
 }
@@ -215,11 +225,12 @@ model Development {
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
-  unitTypes   UnitType[]
-  units       Unit[]
-  priceTables PriceTable[]
-  allocations Allocation[]
-  documents   Document[]
+  unitTypes     UnitType[]
+  units         Unit[]
+  priceTables   PriceTable[]
+  allocations   Allocation[]
+  documents     Document[]
+  opportunities Opportunity[]
 }
 
 model UnitType {
@@ -257,8 +268,134 @@ model Unit {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  prices    UnitPrice[]
-  documents Document[]
+  prices        UnitPrice[]
+  documents     Document[]
+  opportunities Opportunity[]
+}
+
+// ---------------------------------------------------------------------------
+// CRM comercial
+// ---------------------------------------------------------------------------
+
+model SalesPipeline {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  isDefault      Boolean      @default(false)
+  isActive       Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  stages        SalesStage[]
+  opportunities Opportunity[]
+
+  @@index([organizationId, isActive])
+  @@index([organizationId, createdAt])
+}
+
+model SalesStage {
+  id             String        @id @default(cuid())
+  organizationId String
+  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipelineId     String
+  pipeline       SalesPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name           String
+  code           String
+  position       Int
+  colorKey       String
+  isWon          Boolean       @default(false)
+  isLost         Boolean       @default(false)
+  createdAt      DateTime      @default(now())
+  updatedAt      DateTime      @updatedAt
+
+  opportunities Opportunity[]
+  historyFrom   OpportunityStageHistory[] @relation("OpportunityHistoryFromStage")
+  historyTo     OpportunityStageHistory[] @relation("OpportunityHistoryToStage")
+
+  @@unique([pipelineId, code])
+  @@unique([pipelineId, position])
+  @@index([organizationId, pipelineId])
+}
+
+model Opportunity {
+  id                String        @id @default(cuid())
+  organizationId    String
+  organization      Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  personId          String
+  person            Person        @relation(fields: [personId], references: [id], onDelete: Restrict)
+  pipelineId        String
+  pipeline          SalesPipeline @relation(fields: [pipelineId], references: [id], onDelete: Restrict)
+  stageId           String
+  stage             SalesStage    @relation(fields: [stageId], references: [id], onDelete: Restrict)
+  assignedUserId    String?
+  assignedUser      User?         @relation("OpportunityAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  developmentId     String?
+  development       Development?  @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  unitId            String?
+  unit              Unit?         @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  source            String?
+  estimatedValue    Decimal?      @db.Decimal(18, 2)
+  probability       Int?
+  nextContactAt     DateTime?
+  expectedCloseDate DateTime?
+  lostReason        String?
+  notes             String?
+  createdAt         DateTime      @default(now())
+  updatedAt         DateTime      @updatedAt
+
+  stageHistory OpportunityStageHistory[]
+  activities   SalesActivity[]
+
+  @@index([organizationId, stageId, createdAt])
+  @@index([organizationId, pipelineId, createdAt])
+  @@index([organizationId, assignedUserId, createdAt])
+  @@index([organizationId, developmentId, createdAt])
+  @@index([organizationId, personId, createdAt])
+  @@index([organizationId, unitId])
+  @@index([organizationId, nextContactAt])
+}
+
+model OpportunityStageHistory {
+  id              String       @id @default(cuid())
+  organizationId  String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  opportunityId   String
+  opportunity     Opportunity  @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  fromStageId     String?
+  fromStage       SalesStage?  @relation("OpportunityHistoryFromStage", fields: [fromStageId], references: [id], onDelete: Restrict)
+  toStageId       String
+  toStage         SalesStage   @relation("OpportunityHistoryToStage", fields: [toStageId], references: [id], onDelete: Restrict)
+  changedByUserId String
+  changedByUser   User         @relation("OpportunityStageChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict)
+  changedAt       DateTime     @default(now())
+
+  @@index([organizationId, opportunityId, changedAt])
+  @@index([changedByUserId, changedAt])
+}
+
+model SalesActivity {
+  id             String            @id @default(cuid())
+  organizationId String
+  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  opportunityId  String
+  opportunity    Opportunity       @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  personId       String
+  person         Person            @relation(fields: [personId], references: [id], onDelete: Restrict)
+  assignedUserId String?
+  assignedUser   User?             @relation("SalesActivityAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  type           SalesActivityType
+  scheduledAt    DateTime?
+  completedAt    DateTime?
+  summary        String?
+  notes          String?
+  createdAt      DateTime          @default(now())
+  updatedAt      DateTime          @updatedAt
+
+  @@index([organizationId, opportunityId, createdAt])
+  @@index([organizationId, personId, createdAt])
+  @@index([organizationId, assignedUserId, scheduledAt])
+  @@index([organizationId, completedAt, scheduledAt])
 }
 
 model PriceTable {
@@ -482,5 +619,15 @@ enum InteractionType {
   LIGACAO
   WHATSAPP
   EMAIL
+  OUTRO
+}
+
+enum SalesActivityType {
+  LIGACAO
+  WHATSAPP
+  EMAIL
+  REUNIAO
+  VISITA
+  FOLLOW_UP
   OUTRO
 }
