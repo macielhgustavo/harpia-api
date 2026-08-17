@@ -241,6 +241,17 @@ export class DevelopmentsService {
           AND "organizationId" = ${actor.organizationId}
         FOR UPDATE
       `;
+      const reservations = await tx.unitReservation.count({
+        where: {
+          organizationId: actor.organizationId,
+          unit: { developmentId: id },
+        },
+      });
+      if (reservations > 0) {
+        throw new ConflictException(
+          'Empreendimento possui histórico de reservas e não pode ser removido',
+        );
+      }
       const cascadedPriceTables = await tx.$queryRaw<{ id: string }[]>`
         SELECT "id"
         FROM "PriceTable"

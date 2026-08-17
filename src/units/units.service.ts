@@ -1,5 +1,6 @@
 import {
   BadRequestException,
+  ConflictException,
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
@@ -93,6 +94,7 @@ export class UnitsService {
   }
 
   async create(actor: MutationActor, dto: CreateUnitDto) {
+    this.assertReservationManagedStatus(dto.status);
     await this.assertDevelopmentInOrg(dto.developmentId, actor.organizationId);
     if (dto.unitTypeId) {
       await this.assertUnitTypeInDevelopment(
@@ -133,6 +135,7 @@ export class UnitsService {
   }
 
   async update(id: string, actor: MutationActor, dto: UpdateUnitDto) {
+    this.assertReservationManagedStatus(dto.status);
     const changedFields = UNIT_UPDATE_FIELDS.filter(
       (field) => dto[field] !== undefined,
     );
@@ -170,6 +173,12 @@ export class UnitsService {
         FOR UPDATE
       `;
       if (!unit) throw new NotFoundException('Unidade não encontrada');
+
+      if (unit.status === UnitStatus.RESERVADA && dto.status !== undefined) {
+        throw new ConflictException(
+          'O status de uma unidade reservada só pode mudar pelo fluxo de reservas',
+        );
+      }
 
       if (
         preflightDevelopmentId !== undefined &&
@@ -224,6 +233,15 @@ export class UnitsService {
       `;
       if (!unit) throw new NotFoundException('Unidade não encontrada');
 
+      const reservations = await tx.unitReservation.count({
+        where: { unitId: id, organizationId: actor.organizationId },
+      });
+      if (reservations > 0) {
+        throw new ConflictException(
+          'Unidade possui histórico de reservas e não pode ser removida',
+        );
+      }
+
       const cascadedUnitPrices = await tx.unitPrice.findMany({
         where: { unitId: id, organizationId: actor.organizationId },
         select: { id: true, unitId: true, priceTableId: true },
@@ -273,6 +291,14 @@ export class UnitsService {
     if (!development) {
       throw new BadRequestException(
         'Empreendimento inválido para esta organização',
+      );
+    }
+  }
+
+  private assertReservationManagedStatus(status?: UnitStatus) {
+    if (status === UnitStatus.RESERVADA) {
+      throw new BadRequestException(
+        'O status RESERVADA só pode ser definido pelo fluxo de reservas',
       );
     }
   }

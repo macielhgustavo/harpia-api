@@ -349,6 +349,34 @@ GET /reports/returns?status=ATRASADO&format=pdf
 GET /reports/investor-positions?format=xlsx
 ```
 
+## Commercial unit reservations
+
+Authenticated users with `SALES_READ` can list and inspect reservations. Users
+with `SALES_WRITE` can reserve an available unit, cancel an active reservation
+or convert it into the next commercial workflow:
+
+| Method | Route | Purpose |
+| --- | --- | --- |
+| `GET` | `/reservations` | Paginated list; filters: `unitId`, `personId`, `opportunityId`, `developmentId`, `status`. |
+| `GET` | `/reservations/:id` | Tenant-scoped reservation detail. |
+| `POST` | `/reservations` | Creates an active reservation and atomically changes the unit to `RESERVADA`. |
+| `POST` | `/reservations/:id/cancel` | Cancels an active reservation and releases the unit to `DISPONIVEL`. |
+| `POST` | `/reservations/:id/convert` | Marks the reservation `CONVERTIDA`; the unit remains reserved for the proposal/sale handoff. |
+
+Only `DISPONIVEL` units can be reserved. A partial unique index guarantees at
+most one `ATIVA` reservation per unit, while tenant-scoped row locks and a
+transaction protect the reservation/unit state under concurrent requests.
+Expiration is normalized whenever reservations are read or mutated: an expired
+active reservation becomes `EXPIRADA`, its unit returns to `DISPONIVEL`, and
+both changes are audited. This runtime normalization is intentional for the
+current single-instance stage; a durable scheduled worker should call the same
+transition when the application is horizontally scaled or expiration must be
+processed without traffic.
+
+Reservation history blocks deletion of its unit, client or development. The
+generic unit CRUD cannot assign or clear `RESERVADA`; only reservation workflows
+own that transition.
+
 ## Deployment
 
 When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.

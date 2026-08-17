@@ -39,6 +39,7 @@ model Organization {
   opportunities           Opportunity[]
   opportunityStageHistory OpportunityStageHistory[]
   salesActivities         SalesActivity[]
+  unitReservations        UnitReservation[]
 }
 
 // ---------------------------------------------------------------------------
@@ -66,6 +67,9 @@ model User {
   assignedOpportunities   Opportunity[]             @relation("OpportunityAssignedUser")
   opportunityStageChanges OpportunityStageHistory[] @relation("OpportunityStageChangedBy")
   assignedSalesActivities SalesActivity[]           @relation("SalesActivityAssignedUser")
+  reservationsCreated     UnitReservation[]         @relation("UnitReservationCreatedBy")
+  reservationsCancelled   UnitReservation[]         @relation("UnitReservationCancelledBy")
+  reservationsConverted   UnitReservation[]         @relation("UnitReservationConvertedBy")
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
 
@@ -149,13 +153,14 @@ model Person {
   createdAt      DateTime           @default(now())
   updatedAt      DateTime           @updatedAt
 
-  roles           PersonRole[]
-  users           User[]
-  investments     Investment[]
-  documents       Document[]
-  interactions    Interaction[]
-  opportunities   Opportunity[]
-  salesActivities SalesActivity[]
+  roles            PersonRole[]
+  users            User[]
+  investments      Investment[]
+  documents        Document[]
+  interactions     Interaction[]
+  opportunities    Opportunity[]
+  salesActivities  SalesActivity[]
+  unitReservations UnitReservation[]
 
   @@unique([organizationId, document])
 }
@@ -271,6 +276,7 @@ model Unit {
   prices        UnitPrice[]
   documents     Document[]
   opportunities Opportunity[]
+  reservations  UnitReservation[]
 }
 
 // ---------------------------------------------------------------------------
@@ -346,6 +352,7 @@ model Opportunity {
 
   stageHistory OpportunityStageHistory[]
   activities   SalesActivity[]
+  reservations UnitReservation[]
 
   @@index([organizationId, stageId, createdAt])
   @@index([organizationId, pipelineId, createdAt])
@@ -396,6 +403,42 @@ model SalesActivity {
   @@index([organizationId, personId, createdAt])
   @@index([organizationId, assignedUserId, scheduledAt])
   @@index([organizationId, completedAt, scheduledAt])
+}
+
+// ---------------------------------------------------------------------------
+// Reservas comerciais de unidades
+// ---------------------------------------------------------------------------
+
+model UnitReservation {
+  id                 String                @id @default(cuid())
+  organizationId     String
+  organization       Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  unitId             String
+  unit               Unit                  @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  personId           String
+  person             Person                @relation(fields: [personId], references: [id], onDelete: Restrict)
+  opportunityId      String?
+  opportunity        Opportunity?          @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  createdByUserId    String
+  createdByUser      User                  @relation("UnitReservationCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  startsAt           DateTime              @default(now())
+  expiresAt          DateTime
+  status             UnitReservationStatus @default(ATIVA)
+  notes              String?
+  cancelledAt        DateTime?
+  cancelledByUserId  String?
+  cancelledByUser    User?                 @relation("UnitReservationCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+  cancellationReason String?
+  convertedAt        DateTime?
+  convertedByUserId  String?
+  convertedByUser    User?                 @relation("UnitReservationConvertedBy", fields: [convertedByUserId], references: [id], onDelete: Restrict)
+  createdAt          DateTime              @default(now())
+  updatedAt          DateTime              @updatedAt
+
+  @@index([organizationId, status, expiresAt])
+  @@index([organizationId, unitId, createdAt])
+  @@index([organizationId, personId, createdAt])
+  @@index([organizationId, opportunityId, createdAt])
 }
 
 model PriceTable {
@@ -630,4 +673,11 @@ enum SalesActivityType {
   VISITA
   FOLLOW_UP
   OUTRO
+}
+
+enum UnitReservationStatus {
+  ATIVA
+  CANCELADA
+  EXPIRADA
+  CONVERTIDA
 }

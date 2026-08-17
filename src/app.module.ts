@@ -24,6 +24,7 @@ import { PermissionsGuard } from './auth/permissions/permissions.guard';
 import { UsersModule } from './users/users.module';
 import { AuditModule } from './audit/audit.module';
 import { CrmModule } from './crm/crm.module';
+import { ReservationsModule } from './reservations/reservations.module';
 
 @Module({
   imports: [
@@ -47,6 +48,7 @@ import { CrmModule } from './crm/crm.module';
     UsersModule,
     AuditModule,
     CrmModule,
+    ReservationsModule,
   ],
   controllers: [AppController],
   providers: [

@@ -156,6 +156,7 @@ describe('financial response hardening', () => {
     const prisma = {
       person: { findFirst: jest.fn().mockResolvedValue({ id: 'person-1' }) },
       investment: { count: jest.fn().mockResolvedValue(1) },
+      unitReservation: { count: jest.fn().mockResolvedValue(0) },
       development: {
         findFirst: jest.fn().mockResolvedValue({ id: 'development-1' }),
         delete: jest.fn(),

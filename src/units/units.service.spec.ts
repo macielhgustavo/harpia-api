@@ -27,6 +27,7 @@ describe('UnitsService audit', () => {
             { id: 'price-1', unitId: 'unit-1', priceTableId: 'table-1' },
           ]),
       },
+      unitReservation: { count: jest.fn().mockResolvedValue(0) },
       unitType: { findFirst: jest.fn() },
     };
     const prisma = {
@@ -57,7 +58,7 @@ describe('UnitsService audit', () => {
       category: UnitCategory.APARTAMENTO,
     });
     await service.update('unit-1', actor, {
-      status: UnitStatus.RESERVADA,
+      status: UnitStatus.BLOQUEADA,
     });
     await service.remove('unit-1', actor);
 
@@ -79,7 +80,7 @@ describe('UnitsService audit', () => {
         metadata: {
           changedFields: ['status'],
           oldStatus: UnitStatus.DISPONIVEL,
-          newStatus: UnitStatus.RESERVADA,
+          newStatus: UnitStatus.BLOQUEADA,
         },
       }),
       transaction,
@@ -123,6 +124,27 @@ describe('UnitsService audit', () => {
     expect(
       transaction.unitPrice.findMany.mock.invocationCallOrder[0],
     ).toBeLessThan(transaction.unit.delete.mock.invocationCallOrder[0]);
+  });
+
+  it('reserves status changes for the reservation workflow', async () => {
+    const prisma = {};
+    const audit = {};
+    const service = new UnitsService(
+      prisma as unknown as PrismaService,
+      audit as unknown as AuditService,
+    );
+
+    await expect(
+      service.create(
+        { id: 'user-1', organizationId: 'org-a' },
+        {
+          developmentId: 'development-1',
+          identifier: '101',
+          category: UnitCategory.APARTAMENTO,
+          status: UnitStatus.RESERVADA,
+        },
+      ),
+    ).rejects.toBeInstanceOf(BadRequestException);
   });
 
   it('locks a tenant-scoped target type before the unit to avoid delete deadlocks', async () => {

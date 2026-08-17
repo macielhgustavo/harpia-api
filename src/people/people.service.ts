@@ -98,12 +98,15 @@ export class PeopleService {
   async remove(id: string, organizationId: string) {
     await this.ensureExists(id, organizationId);
 
-    // Investment é a única relação com onDelete Restrict apontando para Person;
+    // Investimentos e reservas preservam histórico com onDelete Restrict;
     // pré-checa para dar um erro claro em vez de estourar violação de FK (500).
-    const investments = await this.prisma.investment.count({
-      where: { investorId: id },
-    });
-    if (investments > 0) {
+    const [investments, reservations] = await Promise.all([
+      this.prisma.investment.count({ where: { investorId: id } }),
+      this.prisma.unitReservation.count({
+        where: { personId: id, organizationId },
+      }),
+    ]);
+    if (investments > 0 || reservations > 0) {
       throw new ConflictException(
         'Pessoa possui vínculos existentes e não pode ser removida',
       );

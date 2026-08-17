@@ -26,6 +26,7 @@ describe('DevelopmentsService audit', () => {
         delete: jest.fn().mockResolvedValue({ id: 'development-1' }),
       },
       allocation: { count: jest.fn().mockResolvedValue(0) },
+      unitReservation: { count: jest.fn().mockResolvedValue(0) },
       unitPrice: {
         findMany: jest
           .fn()
