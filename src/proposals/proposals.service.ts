@@ -78,6 +78,7 @@ const PROPOSAL_INCLUDE = {
     },
   },
   reservation: { select: { id: true, status: true, expiresAt: true } },
+  sale: { select: { id: true, saleNumber: true, status: true } },
   createdByUser: { select: { id: true, name: true } },
   sentByUser: { select: { id: true, name: true } },
   acceptedByUser: { select: { id: true, name: true } },

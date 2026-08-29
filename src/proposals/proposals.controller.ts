@@ -7,6 +7,8 @@ import { CreateProposalVersionDto } from './dto/create-proposal-version.dto';
 import { ListProposalsQueryDto } from './dto/list-proposals-query.dto';
 import { RejectProposalDto } from './dto/reject-proposal.dto';
 import { ProposalsService } from './proposals.service';
+import { ConvertProposalToSaleDto } from '../sales/dto/convert-proposal-to-sale.dto';
+import { SalesService } from '../sales/sales.service';
 
 interface AuthUser {
   id: string;
@@ -16,7 +18,10 @@ interface AuthUser {
 @RequirePermissions(PERMISSIONS.SALES_READ)
 @Controller('proposals')
 export class ProposalsController {
-  constructor(private readonly proposals: ProposalsService) {}
+  constructor(
+    private readonly proposals: ProposalsService,
+    private readonly sales: SalesService,
+  ) {}
 
   @Get('price-preview')
   pricePreview(@CurrentUser() user: AuthUser, @Query('unitId') unitId: string) {
@@ -62,6 +67,16 @@ export class ProposalsController {
   @Post(':id/accept')
   accept(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.proposals.accept(id, user);
+  }
+
+  @RequirePermissions(PERMISSIONS.SALES_WRITE)
+  @Post(':id/convert-to-sale')
+  convertToSale(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: ConvertProposalToSaleDto,
+  ) {
+    return this.sales.convertProposal(id, user, dto);
   }
 
   @RequirePermissions(PERMISSIONS.SALES_WRITE)

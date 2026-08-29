@@ -26,6 +26,7 @@ import { AuditModule } from './audit/audit.module';
 import { CrmModule } from './crm/crm.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { ProposalsModule } from './proposals/proposals.module';
+import { SalesModule } from './sales/sales.module';
 
 @Module({
   imports: [
@@ -51,6 +52,7 @@ import { ProposalsModule } from './proposals/proposals.module';
     CrmModule,
     ReservationsModule,
     ProposalsModule,
+    SalesModule,
   ],
   controllers: [AppController],
   providers: [

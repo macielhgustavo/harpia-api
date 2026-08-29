@@ -43,6 +43,10 @@ model Organization {
   salesProposals          SalesProposal[]
   proposalVersions        ProposalVersion[]
   proposalConditions      ProposalPaymentCondition[]
+  sales                   Sale[]
+  saleBuyers              SaleBuyer[]
+  salePaymentPlans        SalePaymentPlan[]
+  saleCommissions         SaleCommission[]
 }
 
 // ---------------------------------------------------------------------------
@@ -78,6 +82,9 @@ model User {
   proposalsAccepted       SalesProposal[]           @relation("SalesProposalAcceptedBy")
   proposalsRejected       SalesProposal[]           @relation("SalesProposalRejectedBy")
   proposalVersionsCreated ProposalVersion[]         @relation("ProposalVersionCreatedBy")
+  proposalsConverted      SalesProposal[]           @relation("SalesProposalConvertedBy")
+  salesCreated            Sale[]                    @relation("SaleCreatedBy")
+  saleCommissions         SaleCommission[]          @relation("SaleCommissionUser")
   createdAt               DateTime                  @default(now())
   updatedAt               DateTime                  @updatedAt
 
@@ -170,6 +177,8 @@ model Person {
   salesActivities  SalesActivity[]
   unitReservations UnitReservation[]
   salesProposals   SalesProposal[]
+  saleBuyers       SaleBuyer[]
+  saleCommissions  SaleCommission[]
 
   @@unique([organizationId, document])
 }
@@ -245,6 +254,7 @@ model Development {
   allocations   Allocation[]
   documents     Document[]
   opportunities Opportunity[]
+  sales         Sale[]
 }
 
 model UnitType {
@@ -287,6 +297,7 @@ model Unit {
   opportunities  Opportunity[]
   reservations   UnitReservation[]
   salesProposals SalesProposal[]
+  sales          Sale[]
 }
 
 // ---------------------------------------------------------------------------
@@ -364,6 +375,7 @@ model Opportunity {
   activities     SalesActivity[]
   reservations   UnitReservation[]
   salesProposals SalesProposal[]
+  sales          Sale[]
 
   @@index([organizationId, stageId, createdAt])
   @@index([organizationId, pipelineId, createdAt])
@@ -458,37 +470,41 @@ model UnitReservation {
 // ---------------------------------------------------------------------------
 
 model SalesProposal {
-  id               String              @id @default(cuid())
-  organizationId   String
-  organization     Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  opportunityId    String?
-  opportunity      Opportunity?        @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
-  reservationId    String?
-  reservation      UnitReservation?    @relation(fields: [reservationId], references: [id], onDelete: Restrict)
-  personId         String
-  person           Person              @relation(fields: [personId], references: [id], onDelete: Restrict)
-  unitId           String
-  unit             Unit                @relation(fields: [unitId], references: [id], onDelete: Restrict)
-  status           SalesProposalStatus @default(RASCUNHO)
-  currentVersionId String?             @unique
-  currentVersion   ProposalVersion?    @relation("CurrentProposalVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
-  validUntil       DateTime?
-  createdByUserId  String
-  createdByUser    User                @relation("SalesProposalCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
-  sentAt           DateTime?
-  sentByUserId     String?
-  sentByUser       User?               @relation("SalesProposalSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
-  acceptedAt       DateTime?
-  acceptedByUserId String?
-  acceptedByUser   User?               @relation("SalesProposalAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
-  rejectedAt       DateTime?
-  rejectedByUserId String?
-  rejectedByUser   User?               @relation("SalesProposalRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: Restrict)
-  rejectionReason  String?
-  createdAt        DateTime            @default(now())
-  updatedAt        DateTime            @updatedAt
+  id                      String              @id @default(cuid())
+  organizationId          String
+  organization            Organization        @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  opportunityId           String?
+  opportunity             Opportunity?        @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  reservationId           String?
+  reservation             UnitReservation?    @relation(fields: [reservationId], references: [id], onDelete: Restrict)
+  personId                String
+  person                  Person              @relation(fields: [personId], references: [id], onDelete: Restrict)
+  unitId                  String
+  unit                    Unit                @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  status                  SalesProposalStatus @default(RASCUNHO)
+  currentVersionId        String?             @unique
+  currentVersion          ProposalVersion?    @relation("CurrentProposalVersion", fields: [currentVersionId], references: [id], onDelete: SetNull)
+  validUntil              DateTime?
+  createdByUserId         String
+  createdByUser           User                @relation("SalesProposalCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  sentAt                  DateTime?
+  sentByUserId            String?
+  sentByUser              User?               @relation("SalesProposalSentBy", fields: [sentByUserId], references: [id], onDelete: Restrict)
+  acceptedAt              DateTime?
+  acceptedByUserId        String?
+  acceptedByUser          User?               @relation("SalesProposalAcceptedBy", fields: [acceptedByUserId], references: [id], onDelete: Restrict)
+  rejectedAt              DateTime?
+  rejectedByUserId        String?
+  rejectedByUser          User?               @relation("SalesProposalRejectedBy", fields: [rejectedByUserId], references: [id], onDelete: Restrict)
+  rejectionReason         String?
+  convertedToSaleAt       DateTime?
+  convertedToSaleByUserId String?
+  convertedToSaleByUser   User?               @relation("SalesProposalConvertedBy", fields: [convertedToSaleByUserId], references: [id], onDelete: Restrict)
+  createdAt               DateTime            @default(now())
+  updatedAt               DateTime            @updatedAt
 
   versions ProposalVersion[] @relation("ProposalVersions")
+  sale     Sale?
 
   @@index([organizationId, opportunityId, createdAt])
   @@index([organizationId, reservationId, createdAt])
@@ -539,6 +555,103 @@ model ProposalPaymentCondition {
   createdAt      DateTime                     @default(now())
 
   @@index([organizationId, versionId, position])
+}
+
+// ---------------------------------------------------------------------------
+// Vendas imobiliárias formais
+// ---------------------------------------------------------------------------
+
+model Sale {
+  id              String         @id @default(cuid())
+  organizationId  String
+  organization    Organization   @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  developmentId   String
+  development     Development    @relation(fields: [developmentId], references: [id], onDelete: Restrict)
+  unitId          String
+  unit            Unit           @relation(fields: [unitId], references: [id], onDelete: Restrict)
+  opportunityId   String?
+  opportunity     Opportunity?   @relation(fields: [opportunityId], references: [id], onDelete: SetNull)
+  proposalId      String?        @unique
+  proposal        SalesProposal? @relation(fields: [proposalId], references: [id], onDelete: Restrict)
+  saleNumber      String
+  status          SaleStatus     @default(ATIVA)
+  saleDate        DateTime
+  grossAmount     Decimal        @db.Decimal(18, 2)
+  discountAmount  Decimal        @db.Decimal(18, 2)
+  netAmount       Decimal        @db.Decimal(18, 2)
+  notes           String?
+  createdByUserId String
+  createdByUser   User           @relation("SaleCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  cancelledAt     DateTime?
+  createdAt       DateTime       @default(now())
+  updatedAt       DateTime       @updatedAt
+
+  buyers      SaleBuyer[]
+  paymentPlan SalePaymentPlan[]
+  commissions SaleCommission[]
+
+  @@unique([organizationId, saleNumber])
+  @@index([organizationId, status, saleDate])
+  @@index([organizationId, developmentId, saleDate])
+  @@index([organizationId, unitId, status])
+  @@index([organizationId, opportunityId])
+}
+
+model SaleBuyer {
+  id                      String       @id @default(cuid())
+  organizationId          String
+  organization            Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  saleId                  String
+  sale                    Sale         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  personId                String
+  person                  Person       @relation(fields: [personId], references: [id], onDelete: Restrict)
+  participationPercentage Decimal?     @db.Decimal(5, 2)
+  isPrimary               Boolean      @default(false)
+  createdAt               DateTime     @default(now())
+
+  @@unique([saleId, personId])
+  @@index([organizationId, personId, createdAt])
+  @@index([organizationId, saleId])
+}
+
+model SalePaymentPlan {
+  id             String                       @id @default(cuid())
+  organizationId String
+  organization   Organization                 @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  saleId         String
+  sale           Sale                         @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  type           ProposalPaymentConditionType
+  amount         Decimal                      @db.Decimal(18, 2)
+  installments   Int?
+  firstDueDate   DateTime?
+  intervalMonths Int?
+  description    String?
+  position       Int
+  createdAt      DateTime                     @default(now())
+
+  @@index([organizationId, saleId, position])
+}
+
+model SaleCommission {
+  id             String               @id @default(cuid())
+  organizationId String
+  organization   Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  saleId         String
+  sale           Sale                 @relation(fields: [saleId], references: [id], onDelete: Cascade)
+  personId       String?
+  person         Person?              @relation(fields: [personId], references: [id], onDelete: Restrict)
+  userId         String?
+  user           User?                @relation("SaleCommissionUser", fields: [userId], references: [id], onDelete: Restrict)
+  percentage     Decimal?             @db.Decimal(5, 2)
+  amount         Decimal              @db.Decimal(18, 2)
+  status         SaleCommissionStatus @default(PREVISTA)
+  notes          String?
+  createdAt      DateTime             @default(now())
+  updatedAt      DateTime             @updatedAt
+
+  @@index([organizationId, saleId, status])
+  @@index([organizationId, personId])
+  @@index([organizationId, userId])
 }
 
 model PriceTable {
@@ -798,4 +911,18 @@ enum ProposalPaymentConditionType {
   SALDO_CHAVES
   FINANCIAMENTO
   OUTRO
+}
+
+enum SaleStatus {
+  ATIVA
+  QUITADA
+  CANCELADA
+  DISTRATADA
+}
+
+enum SaleCommissionStatus {
+  PREVISTA
+  DEVIDA
+  PAGA
+  CANCELADA
 }
