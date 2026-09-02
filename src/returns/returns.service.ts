@@ -7,6 +7,7 @@ import { Prisma, ReturnStatus } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PayablesService } from '../finance/payables.service';
 import { getComputedReturnStatus } from './return-status';
 import { CreateReturnDto } from './dto/create-return.dto';
 import { UpdateReturnDto } from './dto/update-return.dto';
@@ -55,6 +56,7 @@ export class ReturnsService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly payables: PayablesService,
   ) {}
 
   async findAll(
@@ -104,11 +106,12 @@ export class ReturnsService {
   async create(actor: MutationActor, dto: CreateReturnDto) {
     this.assertPersistableStatus(dto.status);
     if (
-      dto.status === ReturnStatus.PAGO &&
-      (!dto.realizedDate || dto.realizedAmount == null)
+      dto.status === ReturnStatus.PAGO ||
+      dto.realizedDate !== undefined ||
+      dto.realizedAmount !== undefined
     ) {
       throw new BadRequestException(
-        'realizedDate e realizedAmount são obrigatórios quando status é PAGO',
+        'Registre o pagamento pelo financeiro para concluir o retorno',
       );
     }
     await this.assertAllocationInOrg(dto.allocationId, actor.organizationId);
@@ -137,19 +140,7 @@ export class ReturnsService {
         },
         tx,
       );
-      if (createdReturn.status === ReturnStatus.PAGO) {
-        await this.audit.record(
-          {
-            organizationId: actor.organizationId,
-            actorUserId: actor.id,
-            action: AUDIT_ACTIONS.RETURN_PAID,
-            entityType: AUDIT_ENTITY_TYPES.RETURN,
-            entityId: createdReturn.id,
-            metadata: { newStatus: createdReturn.status },
-          },
-          tx,
-        );
-      }
+      await this.payables.createForInvestorReturn(createdReturn.id, actor, tx);
       return createdReturn;
     });
   }
@@ -170,15 +161,15 @@ export class ReturnsService {
       `;
       if (!existing) throw new NotFoundException('Retorno não encontrado');
 
-      // Marcar como PAGO exige realizedDate e realizedAmount (no payload ou já existentes).
-      if (dto.status === ReturnStatus.PAGO) {
-        const realizedDate = dto.realizedDate ?? existing.realizedDate;
-        const realizedAmount = dto.realizedAmount ?? existing.realizedAmount;
-        if (!realizedDate || realizedAmount == null) {
-          throw new BadRequestException(
-            'realizedDate e realizedAmount são obrigatórios quando status é PAGO',
-          );
-        }
+      if (dto.status !== undefined && dto.status !== existing.status) {
+        throw new BadRequestException(
+          'O status do retorno é controlado pelo pagamento financeiro',
+        );
+      }
+      if (dto.realizedDate !== undefined || dto.realizedAmount !== undefined) {
+        throw new BadRequestException(
+          'Os valores realizados são controlados pelo pagamento financeiro',
+        );
       }
 
       const statusChange =
@@ -204,6 +195,13 @@ export class ReturnsService {
           status: dto.status,
         },
       });
+      await this.payables.syncInvestorReturnTerms(
+        updatedReturn.id,
+        actor.organizationId,
+        updatedReturn.expectedAmount,
+        updatedReturn.expectedDate,
+        tx,
+      );
       await this.audit.record(
         {
           organizationId: actor.organizationId,
@@ -226,6 +224,15 @@ export class ReturnsService {
     });
     if (!existing) throw new NotFoundException('Retorno não encontrado');
     return this.prisma.$transaction(async (tx) => {
+      const payable = await tx.payable.findFirst({
+        where: { investorReturnId: id, organizationId: actor.organizationId },
+      });
+      if (payable?.paidAmount && Number(payable.paidAmount) > 0) {
+        throw new BadRequestException(
+          'Estorne o pagamento financeiro antes de excluir o retorno',
+        );
+      }
+      if (payable) await tx.payable.delete({ where: { id: payable.id } });
       const deletedReturn = await tx.return.delete({ where: { id } });
       await this.audit.record(
         {

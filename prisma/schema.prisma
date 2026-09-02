@@ -47,6 +47,12 @@ model Organization {
   saleBuyers              SaleBuyer[]
   salePaymentPlans        SalePaymentPlan[]
   saleCommissions         SaleCommission[]
+  receivables             Receivable[]
+  financialPayments       FinancialPayment[]
+  financialCategories     FinancialCategory[]
+  costCenters             CostCenter[]
+  payables                Payable[]
+  financialTransactions   FinancialTransaction[]
 }
 
 // ---------------------------------------------------------------------------
@@ -54,39 +60,41 @@ model Organization {
 // ---------------------------------------------------------------------------
 
 model User {
-  id                      String                    @id @default(cuid())
-  email                   String                    @unique
-  password                String
-  tokenVersion            Int                       @default(0)
-  role                    UserRole                  @default(LEITURA)
-  isActive                Boolean                   @default(true)
-  lastLoginAt             DateTime?
-  invitedAt               DateTime?
-  acceptedAt              DateTime?
-  name                    String
-  organizationId          String
-  organization            Organization              @relation(fields: [organizationId], references: [id])
-  personId                String?
-  person                  Person?                   @relation(fields: [personId], references: [id], onDelete: SetNull)
-  passwordResetTokens     PasswordResetToken[]
-  invitationsSent         UserInvitation[]          @relation("UserInvitationInvitedBy")
-  auditLogs               AuditLog[]
-  assignedOpportunities   Opportunity[]             @relation("OpportunityAssignedUser")
-  opportunityStageChanges OpportunityStageHistory[] @relation("OpportunityStageChangedBy")
-  assignedSalesActivities SalesActivity[]           @relation("SalesActivityAssignedUser")
-  reservationsCreated     UnitReservation[]         @relation("UnitReservationCreatedBy")
-  reservationsCancelled   UnitReservation[]         @relation("UnitReservationCancelledBy")
-  reservationsConverted   UnitReservation[]         @relation("UnitReservationConvertedBy")
-  proposalsCreated        SalesProposal[]           @relation("SalesProposalCreatedBy")
-  proposalsSent           SalesProposal[]           @relation("SalesProposalSentBy")
-  proposalsAccepted       SalesProposal[]           @relation("SalesProposalAcceptedBy")
-  proposalsRejected       SalesProposal[]           @relation("SalesProposalRejectedBy")
-  proposalVersionsCreated ProposalVersion[]         @relation("ProposalVersionCreatedBy")
-  proposalsConverted      SalesProposal[]           @relation("SalesProposalConvertedBy")
-  salesCreated            Sale[]                    @relation("SaleCreatedBy")
-  saleCommissions         SaleCommission[]          @relation("SaleCommissionUser")
-  createdAt               DateTime                  @default(now())
-  updatedAt               DateTime                  @updatedAt
+  id                        String                    @id @default(cuid())
+  email                     String                    @unique
+  password                  String
+  tokenVersion              Int                       @default(0)
+  role                      UserRole                  @default(LEITURA)
+  isActive                  Boolean                   @default(true)
+  lastLoginAt               DateTime?
+  invitedAt                 DateTime?
+  acceptedAt                DateTime?
+  name                      String
+  organizationId            String
+  organization              Organization              @relation(fields: [organizationId], references: [id])
+  personId                  String?
+  person                    Person?                   @relation(fields: [personId], references: [id], onDelete: SetNull)
+  passwordResetTokens       PasswordResetToken[]
+  invitationsSent           UserInvitation[]          @relation("UserInvitationInvitedBy")
+  auditLogs                 AuditLog[]
+  assignedOpportunities     Opportunity[]             @relation("OpportunityAssignedUser")
+  opportunityStageChanges   OpportunityStageHistory[] @relation("OpportunityStageChangedBy")
+  assignedSalesActivities   SalesActivity[]           @relation("SalesActivityAssignedUser")
+  reservationsCreated       UnitReservation[]         @relation("UnitReservationCreatedBy")
+  reservationsCancelled     UnitReservation[]         @relation("UnitReservationCancelledBy")
+  reservationsConverted     UnitReservation[]         @relation("UnitReservationConvertedBy")
+  proposalsCreated          SalesProposal[]           @relation("SalesProposalCreatedBy")
+  proposalsSent             SalesProposal[]           @relation("SalesProposalSentBy")
+  proposalsAccepted         SalesProposal[]           @relation("SalesProposalAcceptedBy")
+  proposalsRejected         SalesProposal[]           @relation("SalesProposalRejectedBy")
+  proposalVersionsCreated   ProposalVersion[]         @relation("ProposalVersionCreatedBy")
+  proposalsConverted        SalesProposal[]           @relation("SalesProposalConvertedBy")
+  salesCreated              Sale[]                    @relation("SaleCreatedBy")
+  saleCommissions           SaleCommission[]          @relation("SaleCommissionUser")
+  financialPaymentsCreated  FinancialPayment[]        @relation("FinancialPaymentCreatedBy")
+  financialPaymentsReversed FinancialPayment[]        @relation("FinancialPaymentReversedBy")
+  createdAt                 DateTime                  @default(now())
+  updatedAt                 DateTime                  @updatedAt
 
   @@index([organizationId, role])
   @@index([organizationId, isActive])
@@ -179,6 +187,7 @@ model Person {
   salesProposals   SalesProposal[]
   saleBuyers       SaleBuyer[]
   saleCommissions  SaleCommission[]
+  suppliedPayables Payable[]         @relation("PayableSupplier")
 
   @@unique([organizationId, document])
 }
@@ -210,8 +219,12 @@ model Company {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  developments Development[]
-  bankAccounts BankAccount[]
+  developments          Development[]
+  bankAccounts          BankAccount[]
+  receivables           Receivable[]
+  costCenters           CostCenter[]
+  payables              Payable[]
+  financialTransactions FinancialTransaction[]
 }
 
 model BankAccount {
@@ -225,6 +238,11 @@ model BankAccount {
   company        Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+
+  receivables           Receivable[]
+  financialPayments     FinancialPayment[]
+  payables              Payable[]
+  financialTransactions FinancialTransaction[]
 }
 
 // ---------------------------------------------------------------------------
@@ -248,13 +266,16 @@ model Development {
   createdAt            DateTime          @default(now())
   updatedAt            DateTime          @updatedAt
 
-  unitTypes     UnitType[]
-  units         Unit[]
-  priceTables   PriceTable[]
-  allocations   Allocation[]
-  documents     Document[]
-  opportunities Opportunity[]
-  sales         Sale[]
+  unitTypes             UnitType[]
+  units                 Unit[]
+  priceTables           PriceTable[]
+  allocations           Allocation[]
+  documents             Document[]
+  opportunities         Opportunity[]
+  sales                 Sale[]
+  costCenters           CostCenter[]
+  payables              Payable[]
+  financialTransactions FinancialTransaction[]
 }
 
 model UnitType {
@@ -589,6 +610,7 @@ model Sale {
   buyers      SaleBuyer[]
   paymentPlan SalePaymentPlan[]
   commissions SaleCommission[]
+  receivables Receivable[]
 
   @@unique([organizationId, saleNumber])
   @@index([organizationId, status, saleDate])
@@ -629,6 +651,8 @@ model SalePaymentPlan {
   position       Int
   createdAt      DateTime                     @default(now())
 
+  receivables Receivable[]
+
   @@index([organizationId, saleId, position])
 }
 
@@ -649,9 +673,198 @@ model SaleCommission {
   createdAt      DateTime             @default(now())
   updatedAt      DateTime             @updatedAt
 
+  payable Payable?
+
   @@index([organizationId, saleId, status])
   @@index([organizationId, personId])
   @@index([organizationId, userId])
+}
+
+// ---------------------------------------------------------------------------
+// Parcelas e contas a receber
+// ---------------------------------------------------------------------------
+
+model Receivable {
+  id                String               @id @default(cuid())
+  organizationId    String
+  organization      Organization         @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId         String?
+  company           Company?             @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  bankAccountId     String?
+  bankAccount       BankAccount?         @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  saleId            String?
+  sale              Sale?                @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  salePaymentPlanId String?
+  salePaymentPlan   SalePaymentPlan?     @relation(fields: [salePaymentPlanId], references: [id], onDelete: Restrict)
+  sourceType        ReceivableSourceType
+  sourceId          String
+  sourceSequence    Int
+  description       String
+  dueDate           DateTime
+  originalAmount    Decimal              @db.Decimal(18, 2)
+  adjustedAmount    Decimal              @db.Decimal(18, 2)
+  paidAmount        Decimal              @default(0) @db.Decimal(18, 2)
+  status            ReceivableStatus     @default(PENDENTE)
+  paidAt            DateTime?
+  cancelledAt       DateTime?
+  createdAt         DateTime             @default(now())
+  updatedAt         DateTime             @updatedAt
+
+  payments     FinancialPayment[]
+  transactions FinancialTransaction[]
+
+  @@unique([organizationId, sourceType, sourceId, sourceSequence])
+  @@index([organizationId, status, dueDate])
+  @@index([organizationId, saleId, dueDate])
+  @@index([organizationId, companyId, dueDate])
+  @@index([organizationId, bankAccountId, dueDate])
+}
+
+model FinancialPayment {
+  id               String       @id @default(cuid())
+  organizationId   String
+  organization     Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  receivableId     String?
+  receivable       Receivable?  @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  payableId        String?
+  payable          Payable?     @relation(fields: [payableId], references: [id], onDelete: Restrict)
+  bankAccountId    String
+  bankAccount      BankAccount  @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  amount           Decimal      @db.Decimal(18, 2)
+  paidAt           DateTime
+  notes            String?
+  createdByUserId  String
+  createdByUser    User         @relation("FinancialPaymentCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  reversedAt       DateTime?
+  reversedByUserId String?
+  reversedByUser   User?        @relation("FinancialPaymentReversedBy", fields: [reversedByUserId], references: [id], onDelete: Restrict)
+  reversalReason   String?
+  createdAt        DateTime     @default(now())
+  updatedAt        DateTime     @updatedAt
+
+  transaction FinancialTransaction?
+
+  @@index([organizationId, receivableId, paidAt])
+  @@index([organizationId, payableId, paidAt])
+  @@index([organizationId, bankAccountId, paidAt])
+  @@index([organizationId, reversedAt])
+}
+
+// ---------------------------------------------------------------------------
+// Núcleo financeiro geral
+// ---------------------------------------------------------------------------
+
+model FinancialCategory {
+  id             String                @id @default(cuid())
+  organizationId String
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  type           FinancialCategoryType
+  isDefault      Boolean               @default(false)
+  active         Boolean               @default(true)
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
+
+  payables Payable[]
+
+  @@unique([organizationId, name, type])
+  @@index([organizationId, type, active])
+}
+
+model CostCenter {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  companyId      String?
+  company        Company?     @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  developmentId  String?
+  development    Development? @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  payables     Payable[]
+  transactions FinancialTransaction[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, active])
+  @@index([organizationId, companyId])
+  @@index([organizationId, developmentId])
+}
+
+model Payable {
+  id               String             @id @default(cuid())
+  organizationId   String
+  organization     Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  companyId        String?
+  company          Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  developmentId    String?
+  development      Development?       @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  bankAccountId    String?
+  bankAccount      BankAccount?       @relation(fields: [bankAccountId], references: [id], onDelete: SetNull)
+  categoryId       String?
+  category         FinancialCategory? @relation(fields: [categoryId], references: [id], onDelete: SetNull)
+  costCenterId     String?
+  costCenter       CostCenter?        @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  supplierPersonId String?
+  supplierPerson   Person?            @relation("PayableSupplier", fields: [supplierPersonId], references: [id], onDelete: SetNull)
+  saleCommissionId String?            @unique
+  saleCommission   SaleCommission?    @relation(fields: [saleCommissionId], references: [id], onDelete: Restrict)
+  investorReturnId String?            @unique
+  investorReturn   Return?            @relation(fields: [investorReturnId], references: [id], onDelete: Restrict)
+  description      String
+  dueDate          DateTime
+  originalAmount   Decimal            @db.Decimal(18, 2)
+  paidAmount       Decimal            @default(0) @db.Decimal(18, 2)
+  status           PayableStatus      @default(PENDENTE)
+  sourceType       PayableSourceType?
+  sourceId         String?
+  paidAt           DateTime?
+  cancelledAt      DateTime?
+  createdAt        DateTime           @default(now())
+  updatedAt        DateTime           @updatedAt
+
+  payments     FinancialPayment[]
+  transactions FinancialTransaction[]
+
+  @@unique([organizationId, sourceType, sourceId])
+  @@index([organizationId, status, dueDate])
+  @@index([organizationId, companyId, dueDate])
+  @@index([organizationId, developmentId, dueDate])
+  @@index([organizationId, costCenterId, dueDate])
+}
+
+model FinancialTransaction {
+  id             String                   @id @default(cuid())
+  organizationId String
+  organization   Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bankAccountId  String
+  bankAccount    BankAccount              @relation(fields: [bankAccountId], references: [id], onDelete: Restrict)
+  companyId      String?
+  company        Company?                 @relation(fields: [companyId], references: [id], onDelete: SetNull)
+  developmentId  String?
+  development    Development?             @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  costCenterId   String?
+  costCenter     CostCenter?              @relation(fields: [costCenterId], references: [id], onDelete: SetNull)
+  paymentId      String                   @unique
+  payment        FinancialPayment         @relation(fields: [paymentId], references: [id], onDelete: Restrict)
+  receivableId   String?
+  receivable     Receivable?              @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  payableId      String?
+  payable        Payable?                 @relation(fields: [payableId], references: [id], onDelete: Restrict)
+  type           FinancialTransactionType
+  amount         Decimal                  @db.Decimal(18, 2)
+  date           DateTime
+  description    String
+  reversedAt     DateTime?
+  createdAt      DateTime                 @default(now())
+
+  @@index([organizationId, date, type])
+  @@index([organizationId, companyId, date])
+  @@index([organizationId, developmentId, date])
+  @@index([organizationId, costCenterId, date])
+  @@index([organizationId, bankAccountId, date])
 }
 
 model PriceTable {
@@ -735,6 +948,8 @@ model Return {
   status         ReturnStatus @default(PENDENTE)
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
+
+  payable Payable?
 }
 
 // ---------------------------------------------------------------------------
@@ -925,4 +1140,38 @@ enum SaleCommissionStatus {
   DEVIDA
   PAGA
   CANCELADA
+}
+
+enum ReceivableSourceType {
+  SALE_PAYMENT_PLAN
+}
+
+enum ReceivableStatus {
+  PENDENTE
+  PARCIAL
+  PAGO
+  CANCELADO
+}
+
+enum FinancialCategoryType {
+  RECEITA
+  DESPESA
+}
+
+enum PayableStatus {
+  PENDENTE
+  PARCIAL
+  PAGO
+  CANCELADO
+}
+
+enum PayableSourceType {
+  INVESTOR_RETURN
+  SALE_COMMISSION
+  MANUAL
+}
+
+enum FinancialTransactionType {
+  ENTRADA
+  SAIDA
 }

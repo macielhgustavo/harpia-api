@@ -8,6 +8,7 @@ import {
   IsOptional,
   IsString,
   Matches,
+  Max,
   MaxLength,
   Min,
 } from 'class-validator';
@@ -28,6 +29,7 @@ export class ProposalPaymentConditionDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(600)
   installments?: number;
 
   @IsOptional()
@@ -38,6 +40,7 @@ export class ProposalPaymentConditionDto {
   @Type(() => Number)
   @IsInt()
   @Min(1)
+  @Max(120)
   intervalMonths?: number;
 
   @IsOptional()

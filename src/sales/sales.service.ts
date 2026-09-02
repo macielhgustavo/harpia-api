@@ -17,6 +17,7 @@ import { randomUUID } from 'crypto';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditEntry, AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReceivablesService } from '../receivables/receivables.service';
 import { ConvertProposalToSaleDto } from './dto/convert-proposal-to-sale.dto';
 import { CreateSaleCommissionDto } from './dto/create-sale-commission.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
@@ -117,6 +118,14 @@ const SALE_INCLUDE = {
     },
     orderBy: { createdAt: 'asc' as const },
   },
+  receivables: {
+    select: {
+      id: true,
+      adjustedAmount: true,
+      paidAmount: true,
+      status: true,
+    },
+  },
 } satisfies Prisma.SaleInclude;
 
 @Injectable()
@@ -124,6 +133,7 @@ export class SalesService {
   constructor(
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
+    private readonly receivables: ReceivablesService,
   ) {}
 
   async findAll(organizationId: string, query: ListSalesQueryDto) {
@@ -199,7 +209,7 @@ export class SalesService {
     });
     if (!sale) throw new NotFoundException('Venda não encontrada');
     const buyerIds = sale.buyers.map((buyer) => buyer.personId);
-    const [documents, audit] = await Promise.all([
+    const [documents, audit, receivables] = await Promise.all([
       this.prisma.document.findMany({
         where: {
           organizationId,
@@ -230,8 +240,14 @@ export class SalesService {
         page: 1,
         pageSize: 10,
       }),
+      this.receivables.findForSale(sale.id, organizationId),
     ]);
-    return { ...this.presentSale(sale), documents, audit: audit.data };
+    return {
+      ...this.presentSale(sale),
+      receivables,
+      documents,
+      audit: audit.data,
+    };
   }
 
   async convertProposal(
@@ -334,6 +350,18 @@ export class SalesService {
           actor.organizationId,
           dto.commissions ?? [],
         );
+        const development = await tx.development.findFirst({
+          where: {
+            id: unit.developmentId,
+            organizationId: actor.organizationId,
+          },
+          select: { companyId: true, expectedDeliveryDate: true },
+        });
+        if (!development) {
+          throw new ConflictException(
+            'O empreendimento da unidade não está disponível',
+          );
+        }
 
         const auditEntries: AuditEntry[] = [];
         if (reservation.status === UnitReservationStatus.ATIVA) {
@@ -364,6 +392,7 @@ export class SalesService {
             auditEntries,
           );
         }
+        const saleDate = dto.saleDate ? new Date(dto.saleDate) : new Date();
         const sale = await tx.sale.create({
           data: {
             organizationId: actor.organizationId,
@@ -372,7 +401,7 @@ export class SalesService {
             opportunityId: proposal.opportunityId,
             proposalId: proposal.id,
             saleNumber: dto.saleNumber || this.generateSaleNumber(),
-            saleDate: dto.saleDate ? new Date(dto.saleDate) : new Date(),
+            saleDate,
             grossAmount: version.basePrice,
             discountAmount: version.discount,
             netAmount: version.finalPrice,
@@ -413,8 +442,34 @@ export class SalesService {
           include: {
             buyers: { select: { id: true, personId: true, isPrimary: true } },
             commissions: { select: { id: true, personId: true, userId: true } },
+            paymentPlan: {
+              select: {
+                id: true,
+                type: true,
+                amount: true,
+                installments: true,
+                firstDueDate: true,
+                intervalMonths: true,
+                description: true,
+                position: true,
+              },
+              orderBy: { position: 'asc' },
+            },
           },
         });
+        await this.receivables.generateForSale(
+          {
+            id: sale.id,
+            organizationId: actor.organizationId,
+            companyId: development.companyId,
+            saleNumber: sale.saleNumber,
+            saleDate,
+            expectedDeliveryDate: development.expectedDeliveryDate,
+          },
+          sale.paymentPlan,
+          actor.id,
+          tx,
+        );
         const convertedAt = new Date();
         await tx.salesProposal.update({
           where: { id: proposal.id },
@@ -600,14 +655,33 @@ export class SalesService {
   }
 
   private presentSale<
-    T extends { status: SaleStatus; netAmount: Prisma.Decimal },
+    T extends {
+      status: SaleStatus;
+      netAmount: Prisma.Decimal;
+      receivables?: {
+        adjustedAmount: Prisma.Decimal;
+        paidAmount: Prisma.Decimal;
+        status: string;
+      }[];
+    },
   >(sale: T) {
+    const activeReceivables = sale.receivables?.length
+      ? sale.receivables.filter(
+          (receivable) => receivable.status !== 'CANCELADO',
+        )
+      : undefined;
+    const outstandingBalance = activeReceivables
+      ? activeReceivables.reduce(
+          (sum, receivable) =>
+            sum.plus(receivable.adjustedAmount.minus(receivable.paidAmount)),
+          new Prisma.Decimal(0),
+        )
+      : sale.status === SaleStatus.ATIVA
+        ? sale.netAmount
+        : new Prisma.Decimal(0);
     return {
       ...sale,
-      outstandingBalance:
-        sale.status === SaleStatus.ATIVA
-          ? sale.netAmount
-          : new Prisma.Decimal(0),
+      outstandingBalance,
     };
   }
 

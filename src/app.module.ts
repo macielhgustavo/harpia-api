@@ -27,6 +27,8 @@ import { CrmModule } from './crm/crm.module';
 import { ReservationsModule } from './reservations/reservations.module';
 import { ProposalsModule } from './proposals/proposals.module';
 import { SalesModule } from './sales/sales.module';
+import { ReceivablesModule } from './receivables/receivables.module';
+import { FinanceModule } from './finance/finance.module';
 
 @Module({
   imports: [
@@ -53,6 +55,8 @@ import { SalesModule } from './sales/sales.module';
     ReservationsModule,
     ProposalsModule,
     SalesModule,
+    ReceivablesModule,
+    FinanceModule,
   ],
   controllers: [AppController],
   providers: [

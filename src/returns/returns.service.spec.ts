@@ -3,6 +3,7 @@ import { ReturnStatus } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { PayablesService } from '../finance/payables.service';
 import { ReturnsService } from './returns.service';
 
 describe('ReturnsService audit', () => {
@@ -10,15 +11,24 @@ describe('ReturnsService audit', () => {
   let transaction: ReturnType<typeof createTransactionMock>;
   let prisma: ReturnType<typeof createPrismaMock>;
   let audit: { record: jest.Mock };
+  let payables: {
+    createForInvestorReturn: jest.Mock;
+    syncInvestorReturnTerms: jest.Mock;
+  };
   let service: ReturnsService;
 
   beforeEach(() => {
     transaction = createTransactionMock();
     prisma = createPrismaMock(transaction);
     audit = { record: jest.fn().mockResolvedValue({ id: 'audit-1' }) };
+    payables = {
+      createForInvestorReturn: jest.fn().mockResolvedValue({ id: 'payable-1' }),
+      syncInvestorReturnTerms: jest.fn().mockResolvedValue(undefined),
+    };
     service = new ReturnsService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      payables as unknown as PayablesService,
     );
   });
 
@@ -56,20 +66,17 @@ describe('ReturnsService audit', () => {
     expect(audit.record).not.toHaveBeenCalled();
   });
 
-  it('records CREATE and RETURN_PAID when a return starts as paid', async () => {
+  it('creates the investor payable in the same transaction', async () => {
     prisma.allocation.findFirst.mockResolvedValue({ id: 'allocation-1' });
     transaction.return.create.mockResolvedValue({
       id: 'return-1',
-      status: ReturnStatus.PAGO,
+      status: ReturnStatus.PENDENTE,
     });
 
     await service.create(actor, {
       allocationId: 'allocation-1',
       expectedAmount: 1500,
       expectedDate: '2026-08-15',
-      realizedDate: '2026-08-10',
-      realizedAmount: 1500,
-      status: ReturnStatus.PAGO,
     });
 
     expect(audit.record).toHaveBeenNthCalledWith(
@@ -83,21 +90,14 @@ describe('ReturnsService audit', () => {
       },
       transaction,
     );
-    expect(audit.record).toHaveBeenNthCalledWith(
-      2,
-      {
-        organizationId: 'org-a',
-        actorUserId: 'user-1',
-        action: AUDIT_ACTIONS.RETURN_PAID,
-        entityType: AUDIT_ENTITY_TYPES.RETURN,
-        entityId: 'return-1',
-        metadata: { newStatus: ReturnStatus.PAGO },
-      },
+    expect(payables.createForInvestorReturn).toHaveBeenCalledWith(
+      'return-1',
+      actor,
       transaction,
     );
   });
 
-  it('records paid/status transitions and only the changed field names', async () => {
+  it('rejects direct paid transitions because finance owns realization', async () => {
     transaction.$queryRaw.mockResolvedValue([
       {
         id: 'return-1',
@@ -106,35 +106,14 @@ describe('ReturnsService audit', () => {
         realizedAmount: null,
       },
     ]);
-    transaction.return.update.mockResolvedValue({
-      id: 'return-1',
-      status: ReturnStatus.PAGO,
-    });
-
-    await service.update('return-1', actor, {
-      realizedDate: '2026-08-10',
-      realizedAmount: 1500,
-      status: ReturnStatus.PAGO,
-    });
-
-    expect(audit.record).toHaveBeenCalledWith(
-      expect.objectContaining({
-        organizationId: 'org-a',
-        actorUserId: 'user-1',
-        action: AUDIT_ACTIONS.RETURN_PAID,
-        entityType: AUDIT_ENTITY_TYPES.RETURN,
-        entityId: 'return-1',
-        metadata: {
-          changedFields: ['realizedDate', 'realizedAmount', 'status'],
-          oldStatus: ReturnStatus.PENDENTE,
-          newStatus: ReturnStatus.PAGO,
-        },
+    await expect(
+      service.update('return-1', actor, {
+        realizedDate: '2026-08-10',
+        realizedAmount: 1500,
+        status: ReturnStatus.PAGO,
       }),
-      transaction,
-    );
-    expect(transaction.$queryRaw.mock.invocationCallOrder[0]).toBeLessThan(
-      transaction.return.update.mock.invocationCallOrder[0],
-    );
+    ).rejects.toThrow(BadRequestException);
+    expect(transaction.return.update).not.toHaveBeenCalled();
   });
 
   it('does not mutate or audit an invalid paid transition', async () => {
@@ -156,30 +135,39 @@ describe('ReturnsService audit', () => {
     expect(audit.record).not.toHaveBeenCalled();
   });
 
-  it('keeps UPDATE for edits to an already-paid return', async () => {
+  it('syncs forecast edits to the linked payable', async () => {
     transaction.$queryRaw.mockResolvedValue([
       {
         id: 'return-1',
-        status: ReturnStatus.PAGO,
-        realizedDate: new Date('2026-08-10'),
-        realizedAmount: 1500,
+        status: ReturnStatus.PENDENTE,
+        realizedDate: null,
+        realizedAmount: null,
       },
     ]);
     transaction.return.update.mockResolvedValue({
       id: 'return-1',
-      status: ReturnStatus.PAGO,
+      status: ReturnStatus.PENDENTE,
+      expectedAmount: 1600,
+      expectedDate: new Date('2026-08-20'),
     });
 
     await service.update('return-1', actor, {
-      realizedAmount: 1600,
-      status: ReturnStatus.PAGO,
+      expectedAmount: 1600,
+      expectedDate: '2026-08-20',
     });
 
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTIONS.UPDATE,
-        metadata: { changedFields: ['realizedAmount', 'status'] },
+        metadata: { changedFields: ['expectedAmount', 'expectedDate'] },
       }),
+      transaction,
+    );
+    expect(payables.syncInvestorReturnTerms).toHaveBeenCalledWith(
+      'return-1',
+      'org-a',
+      1600,
+      new Date('2026-08-20'),
       transaction,
     );
   });
@@ -187,6 +175,7 @@ describe('ReturnsService audit', () => {
   it('deletes and audits the return in the same transaction', async () => {
     prisma.return.findFirst.mockResolvedValue({ id: 'return-1' });
     transaction.return.delete.mockResolvedValue({ id: 'return-1' });
+    transaction.payable.findFirst.mockResolvedValue(null);
 
     await service.remove('return-1', actor);
 
@@ -208,6 +197,7 @@ function createTransactionMock() {
       update: jest.fn(),
       delete: jest.fn(),
     },
+    payable: { findFirst: jest.fn(), delete: jest.fn() },
   };
 }
 

@@ -11,6 +11,7 @@ import {
 import { AUDIT_ACTIONS } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { ReceivablesService } from '../receivables/receivables.service';
 import { SalesService } from './sales.service';
 
 const actor = { id: 'user-1', organizationId: 'org-a' };
@@ -22,6 +23,7 @@ function transactionMock() {
     personRole: { upsert: jest.fn() },
     user: { findMany: jest.fn() },
     proposalVersion: { findFirst: jest.fn() },
+    development: { findFirst: jest.fn() },
     unitReservation: { update: jest.fn() },
     salesProposal: { update: jest.fn() },
     unit: { update: jest.fn() },
@@ -104,6 +106,7 @@ function detailedSale() {
     ],
     paymentPlan: [],
     commissions: [],
+    receivables: [],
   };
 }
 
@@ -111,6 +114,7 @@ describe('SalesService', () => {
   let tx: ReturnType<typeof transactionMock>;
   let prisma: ReturnType<typeof prismaMock>;
   let audit: { record: jest.Mock; recordMany: jest.Mock; findAll: jest.Mock };
+  let receivables: { generateForSale: jest.Mock; findForSale: jest.Mock };
   let service: SalesService;
 
   beforeEach(() => {
@@ -121,9 +125,14 @@ describe('SalesService', () => {
       recordMany: jest.fn().mockResolvedValue({ count: 5 }),
       findAll: jest.fn().mockResolvedValue({ data: [], pagination: {} }),
     };
+    receivables = {
+      generateForSale: jest.fn().mockResolvedValue([]),
+      findForSale: jest.fn().mockResolvedValue([]),
+    };
     service = new SalesService(
       prisma as unknown as PrismaService,
       audit as unknown as AuditService,
+      receivables as unknown as ReceivablesService,
     );
   });
 
@@ -194,6 +203,10 @@ describe('SalesService', () => {
       { id: 'person-2' },
     ]);
     tx.user.findMany.mockResolvedValue([{ id: 'user-2' }]);
+    tx.development.findFirst.mockResolvedValue({
+      companyId: 'company-1',
+      expectedDeliveryDate: new Date('2029-01-01T00:00:00.000Z'),
+    });
     tx.sale.create.mockResolvedValue({
       id: 'sale-1',
       saleNumber: 'VEN-2026-0001',
@@ -202,6 +215,28 @@ describe('SalesService', () => {
         { id: 'buyer-2', personId: 'person-2', isPrimary: false },
       ],
       commissions: [{ id: 'commission-1', personId: null, userId: 'user-2' }],
+      paymentPlan: [
+        {
+          id: 'plan-1',
+          type: ProposalPaymentConditionType.ENTRADA,
+          amount: new Prisma.Decimal('90000'),
+          installments: null,
+          firstDueDate: null,
+          intervalMonths: null,
+          description: 'Entrada',
+          position: 0,
+        },
+        {
+          id: 'plan-2',
+          type: ProposalPaymentConditionType.PARCELAS,
+          amount: new Prisma.Decimal('400000'),
+          installments: 40,
+          firstDueDate: new Date('2026-09-01'),
+          intervalMonths: 1,
+          description: null,
+          position: 1,
+        },
+      ],
     });
     prisma.sale.findFirst.mockResolvedValue(detailedSale());
   }
@@ -251,6 +286,16 @@ describe('SalesService', () => {
       where: { id: 'unit-1' },
       data: { status: UnitStatus.VENDIDA },
     });
+    expect(receivables.generateForSale).toHaveBeenCalledWith(
+      expect.objectContaining({
+        id: 'sale-1',
+        companyId: 'company-1',
+        saleDate: new Date('2026-08-25'),
+      }),
+      expect.arrayContaining([expect.objectContaining({ id: 'plan-1' })]),
+      'user-1',
+      tx,
+    );
     expect(audit.recordMany).toHaveBeenCalledWith(
       expect.arrayContaining([
         expect.objectContaining({ action: AUDIT_ACTIONS.SALE_CREATED }),
