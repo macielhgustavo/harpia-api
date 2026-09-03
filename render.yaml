@@ -29,3 +29,9 @@ services:
         value: 'false'
       - key: SIGNED_URL_EXPIRATION_SECONDS
         value: '300'
+      - key: COLLECTION_AUTOMATION_ENABLED
+        value: 'true'
+      - key: COLLECTION_FROM_EMAIL
+        sync: false
+      - key: RESEND_API_KEY
+        sync: false

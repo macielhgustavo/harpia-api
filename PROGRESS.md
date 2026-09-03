@@ -1,5 +1,7 @@
 # Progresso — Harpia API
 
+- **[2026-09-02] — Cobrança automatizada:** adicionadas réguas configuráveis por dias antes/depois do vencimento, fila idempotente por parcela e data, processamento recorrente a cada 15 minutos, cancelamento automático para recebíveis quitados/cancelados e até três tentativas controladas. O envio usa Resend somente com credenciais server-side, chave de idempotência e histórico tenant-scoped; regras começam desativadas para evitar disparos acidentais.
+
 - **[2026-09-02] — DRE gerencial:** adicionada apuração por competência ou caixa, com período configurável, comparação automática contra o intervalo anterior, margem líquida e detalhamento das despesas por categoria. A visão respeita tenant e filtros por empresa/SPE, empreendimento e centro de custo.
 
 - **[2026-09-02] — Conciliação bancária:** criado livro de extrato tenant-scoped com importação idempotente por fingerprint, indicadores e filtros paginados. Sugestões exigem mesma conta, natureza, valor e janela de três dias; vínculo, desvínculo, ignorar e restaurar usam lock, constraints e auditoria. Estornos de pagamentos desfazem automaticamente a conciliação sem alterar o lançamento original.

@@ -29,6 +29,7 @@ import { ProposalsModule } from './proposals/proposals.module';
 import { SalesModule } from './sales/sales.module';
 import { ReceivablesModule } from './receivables/receivables.module';
 import { FinanceModule } from './finance/finance.module';
+import { CollectionsModule } from './collections/collections.module';
 
 @Module({
   imports: [
@@ -57,6 +58,7 @@ import { FinanceModule } from './finance/finance.module';
     SalesModule,
     ReceivablesModule,
     FinanceModule,
+    CollectionsModule,
   ],
   controllers: [AppController],
   providers: [

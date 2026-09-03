@@ -54,6 +54,8 @@ model Organization {
   payables                Payable[]
   financialTransactions   FinancialTransaction[]
   bankStatementEntries    BankStatementEntry[]
+  collectionRules         CollectionRule[]
+  collectionDispatches    CollectionDispatch[]
 }
 
 // ---------------------------------------------------------------------------
@@ -713,14 +715,64 @@ model Receivable {
   createdAt         DateTime             @default(now())
   updatedAt         DateTime             @updatedAt
 
-  payments     FinancialPayment[]
-  transactions FinancialTransaction[]
+  payments             FinancialPayment[]
+  transactions         FinancialTransaction[]
+  collectionDispatches CollectionDispatch[]
 
   @@unique([organizationId, sourceType, sourceId, sourceSequence])
   @@index([organizationId, status, dueDate])
   @@index([organizationId, saleId, dueDate])
   @@index([organizationId, companyId, dueDate])
   @@index([organizationId, bankAccountId, dueDate])
+}
+
+// ---------------------------------------------------------------------------
+// Cobrança automatizada
+// ---------------------------------------------------------------------------
+
+model CollectionRule {
+  id             String       @id @default(cuid())
+  organizationId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  name           String
+  daysOffset     Int
+  subject        String
+  message        String
+  active         Boolean      @default(true)
+  createdAt      DateTime     @default(now())
+  updatedAt      DateTime     @updatedAt
+
+  dispatches CollectionDispatch[]
+
+  @@unique([organizationId, name])
+  @@index([organizationId, active, daysOffset])
+}
+
+model CollectionDispatch {
+  id                String                   @id @default(cuid())
+  organizationId    String
+  organization      Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  ruleId            String
+  rule              CollectionRule           @relation(fields: [ruleId], references: [id], onDelete: Restrict)
+  receivableId      String
+  receivable        Receivable               @relation(fields: [receivableId], references: [id], onDelete: Restrict)
+  status            CollectionDispatchStatus @default(PENDENTE)
+  scheduledFor      DateTime
+  recipient         String?
+  subject           String
+  message           String
+  balanceSnapshot   Decimal                  @db.Decimal(18, 2)
+  attemptCount      Int                      @default(0)
+  lastAttemptAt     DateTime?
+  sentAt            DateTime?
+  providerMessageId String?
+  failureReason     String?
+  createdAt         DateTime                 @default(now())
+  updatedAt         DateTime                 @updatedAt
+
+  @@unique([ruleId, receivableId, scheduledFor])
+  @@index([organizationId, status, scheduledFor])
+  @@index([organizationId, receivableId, createdAt])
 }
 
 model FinancialPayment {
@@ -1217,4 +1269,12 @@ enum BankReconciliationStatus {
   PENDENTE
   CONCILIADO
   IGNORADO
+}
+
+enum CollectionDispatchStatus {
+  PENDENTE
+  ENVIANDO
+  ENVIADO
+  FALHOU
+  CANCELADO
 }
