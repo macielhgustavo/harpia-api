@@ -9,6 +9,7 @@ import { PrismaService } from '../prisma/prisma.service';
 import { startOfUtcDay } from '../receivables/receivable-status';
 import { FinanceQueryDto } from './dto/finance-query.dto';
 import { ListTransactionsQueryDto } from './dto/list-transactions-query.dto';
+import { IncomeStatementQueryDto } from './dto/income-statement-query.dto';
 import { FinancialSetupService } from './financial-setup.service';
 
 interface FlowEvent {
@@ -230,6 +231,49 @@ export class FinanceService {
     };
   }
 
+  async incomeStatement(
+    organizationId: string,
+    query: IncomeStatementQueryDto,
+  ) {
+    await this.setup.ensureOrganization(organizationId);
+    const basis = query.basis ?? 'COMPETENCIA';
+    const { start, end } = this.incomeStatementRange(query);
+    const duration = end.getTime() - start.getTime();
+    const previousEnd = new Date(start);
+    const previousStart = new Date(start.getTime() - duration);
+    const [current, previous] = await Promise.all([
+      this.calculateIncomeStatement(organizationId, query, basis, start, end),
+      this.calculateIncomeStatement(
+        organizationId,
+        query,
+        basis,
+        previousStart,
+        previousEnd,
+      ),
+    ]);
+    return {
+      basis,
+      startDate: start.toISOString(),
+      endDate: new Date(end.getTime() - 1).toISOString(),
+      previousStartDate: previousStart.toISOString(),
+      previousEndDate: new Date(previousEnd.getTime() - 1).toISOString(),
+      ...current,
+      previous: {
+        revenue: previous.revenue,
+        expenses: previous.expenses,
+        netIncome: previous.netIncome,
+      },
+      variation: {
+        revenue: this.percentageVariation(previous.revenue, current.revenue),
+        expenses: this.percentageVariation(previous.expenses, current.expenses),
+        netIncome: this.percentageVariation(
+          previous.netIncome,
+          current.netIncome,
+        ),
+      },
+    };
+  }
+
   async cashFlow(organizationId: string, query: FinanceQueryDto) {
     await this.setup.ensureOrganization(organizationId);
     const mode = query.mode ?? 'CONSOLIDADO';
@@ -368,6 +412,142 @@ export class FinanceService {
       ...(query.developmentId ? { developmentId: query.developmentId } : {}),
       ...(query.costCenterId ? { costCenterId: query.costCenterId } : {}),
     };
+  }
+
+  private async calculateIncomeStatement(
+    organizationId: string,
+    query: IncomeStatementQueryDto,
+    basis: 'COMPETENCIA' | 'CAIXA',
+    start: Date,
+    end: Date,
+  ) {
+    const revenueLines = new Map<string, Prisma.Decimal>();
+    const expenseLines = new Map<string, Prisma.Decimal>();
+    if (basis === 'CAIXA') {
+      const transactions = await this.prisma.financialTransaction.findMany({
+        where: {
+          ...this.transactionWhere(organizationId, query),
+          reversedAt: null,
+          date: { gte: start, lt: end },
+        },
+        select: {
+          type: true,
+          amount: true,
+          payable: {
+            select: { category: { select: { id: true, name: true } } },
+          },
+        },
+      });
+      for (const item of transactions) {
+        if (item.type === FinancialTransactionType.ENTRADA) {
+          this.addStatementLine(
+            revenueLines,
+            'Receitas operacionais',
+            item.amount,
+          );
+        } else {
+          this.addStatementLine(
+            expenseLines,
+            item.payable?.category?.name ?? 'Outras despesas',
+            item.amount,
+          );
+        }
+      }
+    } else {
+      const [receivables, payables] = await Promise.all([
+        this.prisma.receivable.findMany({
+          where: {
+            ...this.receivableWhere(organizationId, query),
+            status: { not: ReceivableStatus.CANCELADO },
+            dueDate: { gte: start, lt: end },
+          },
+          select: { adjustedAmount: true },
+        }),
+        this.prisma.payable.findMany({
+          where: {
+            ...this.payableWhere(organizationId, query),
+            status: { not: PayableStatus.CANCELADO },
+            dueDate: { gte: start, lt: end },
+          },
+          select: {
+            originalAmount: true,
+            category: { select: { id: true, name: true } },
+          },
+        }),
+      ]);
+      for (const item of receivables) {
+        this.addStatementLine(
+          revenueLines,
+          'Receitas operacionais',
+          item.adjustedAmount,
+        );
+      }
+      for (const item of payables) {
+        this.addStatementLine(
+          expenseLines,
+          item.category?.name ?? 'Outras despesas',
+          item.originalAmount,
+        );
+      }
+    }
+    const revenue = this.sumStatementLines(revenueLines);
+    const expenses = this.sumStatementLines(expenseLines);
+    const netIncome = revenue.minus(expenses);
+    return {
+      revenue: revenue.toFixed(2),
+      expenses: expenses.toFixed(2),
+      netIncome: netIncome.toFixed(2),
+      margin: revenue.equals(0)
+        ? '0.00'
+        : netIncome.dividedBy(revenue).times(100).toFixed(2),
+      revenueLines: this.presentStatementLines(revenueLines),
+      expenseLines: this.presentStatementLines(expenseLines),
+    };
+  }
+
+  private addStatementLine(
+    lines: Map<string, Prisma.Decimal>,
+    name: string,
+    amount: Prisma.Decimal,
+  ) {
+    lines.set(name, (lines.get(name) ?? new Prisma.Decimal(0)).plus(amount));
+  }
+
+  private sumStatementLines(lines: Map<string, Prisma.Decimal>) {
+    return [...lines.values()].reduce(
+      (sum, amount) => sum.plus(amount),
+      new Prisma.Decimal(0),
+    );
+  }
+
+  private presentStatementLines(lines: Map<string, Prisma.Decimal>) {
+    return [...lines.entries()]
+      .map(([name, amount]) => ({ name, amount: amount.toFixed(2) }))
+      .sort((left, right) => Number(right.amount) - Number(left.amount));
+  }
+
+  private percentageVariation(previous: string, current: string) {
+    const oldValue = new Prisma.Decimal(previous);
+    const newValue = new Prisma.Decimal(current);
+    if (oldValue.equals(0)) return newValue.equals(0) ? '0.00' : null;
+    return newValue
+      .minus(oldValue)
+      .dividedBy(oldValue.abs())
+      .times(100)
+      .toFixed(2);
+  }
+
+  private incomeStatementRange(query: IncomeStatementQueryDto) {
+    const today = startOfUtcDay();
+    const start = query.startDate
+      ? new Date(`${query.startDate}T00:00:00.000Z`)
+      : new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth(), 1));
+    const end = query.endDate
+      ? new Date(`${query.endDate}T00:00:00.000Z`)
+      : new Date(Date.UTC(today.getUTCFullYear(), today.getUTCMonth() + 1, 1));
+    if (query.endDate) end.setUTCDate(end.getUTCDate() + 1);
+    if (start >= end) throw new BadRequestException('Período inválido');
+    return { start, end };
   }
 
   private receivableWhere(

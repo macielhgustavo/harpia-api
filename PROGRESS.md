@@ -1,5 +1,7 @@
 # Progresso — Harpia API
 
+- **[2026-09-02] — DRE gerencial:** adicionada apuração por competência ou caixa, com período configurável, comparação automática contra o intervalo anterior, margem líquida e detalhamento das despesas por categoria. A visão respeita tenant e filtros por empresa/SPE, empreendimento e centro de custo.
+
 - **[2026-09-02] — Conciliação bancária:** criado livro de extrato tenant-scoped com importação idempotente por fingerprint, indicadores e filtros paginados. Sugestões exigem mesma conta, natureza, valor e janela de três dias; vínculo, desvínculo, ignorar e restaurar usam lock, constraints e auditoria. Estornos de pagamentos desfazem automaticamente a conciliação sem alterar o lançamento original.
 
 - **[2026-09-01] — Núcleo financeiro geral:** adicionadas categorias configuráveis com defaults por organização, centros de custo vinculáveis a empresa/empreendimento, contas a pagar manuais e automáticas, pagamentos reversíveis e transações financeiras de entrada/saída. Retornos pendentes geram payable na incorporadora geral; comissões devidas geram payable da venda. Pagamento, baixa, movimento, sincronização da origem e auditoria são atômicos. `GET /finance/summary`, `/finance/cash-flow` e `/finance/transactions` consolidam realizado/projetado com filtros por empresa, empreendimento e centro de custo; movimentações usam `Decimal(18,2)`, locks, constraints e paginação.

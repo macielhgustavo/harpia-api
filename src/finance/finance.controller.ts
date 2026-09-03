@@ -19,6 +19,7 @@ import { ListTransactionsQueryDto } from './dto/list-transactions-query.dto';
 import { ImportBankStatementDto } from './dto/import-bank-statement.dto';
 import { ListReconciliationQueryDto } from './dto/list-reconciliation-query.dto';
 import { MatchReconciliationDto } from './dto/match-reconciliation.dto';
+import { IncomeStatementQueryDto } from './dto/income-statement-query.dto';
 import { BankReconciliationService } from './bank-reconciliation.service';
 import { UpdateCostCenterDto } from './dto/update-cost-center.dto';
 import { UpdateFinancialCategoryDto } from './dto/update-financial-category.dto';
@@ -57,6 +58,14 @@ export class FinanceController {
     @Query() query: ListTransactionsQueryDto,
   ) {
     return this.finance.transactions(user.organizationId, query);
+  }
+
+  @Get('income-statement')
+  incomeStatement(
+    @CurrentUser() user: AuthUser,
+    @Query() query: IncomeStatementQueryDto,
+  ) {
+    return this.finance.incomeStatement(user.organizationId, query);
   }
 
   @Get('categories')
