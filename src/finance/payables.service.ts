@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BankReconciliationStatus,
   FinancialCategoryType,
   FinancialTransactionType,
   PayableSourceType,
@@ -365,9 +366,17 @@ export class PayablesService {
           reversalReason: dto.reason,
         },
       });
-      await tx.financialTransaction.update({
+      const transaction = await tx.financialTransaction.update({
         where: { paymentId: payment.id },
         data: { reversedAt },
+      });
+      const reconciliation = await tx.bankStatementEntry.updateMany({
+        where: { matchedTransactionId: transaction.id },
+        data: {
+          status: BankReconciliationStatus.PENDENTE,
+          matchedTransactionId: null,
+          reconciledAt: null,
+        },
       });
       await tx.payable.update({
         where: { id: payable.id },
@@ -385,6 +394,19 @@ export class PayablesService {
         },
         tx,
       );
+      if (reconciliation.count) {
+        await this.audit.record(
+          {
+            organizationId: actor.organizationId,
+            actorUserId: actor.id,
+            action: AUDIT_ACTIONS.BANK_TRANSACTION_UNMATCHED,
+            entityType: AUDIT_ENTITY_TYPES.FINANCIAL_TRANSACTION,
+            entityId: transaction.id,
+            metadata: { reason: 'PAYMENT_REVERSED' },
+          },
+          tx,
+        );
+      }
     });
     return this.findOne(id, actor.organizationId);
   }

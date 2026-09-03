@@ -53,6 +53,7 @@ model Organization {
   costCenters             CostCenter[]
   payables                Payable[]
   financialTransactions   FinancialTransaction[]
+  bankStatementEntries    BankStatementEntry[]
 }
 
 // ---------------------------------------------------------------------------
@@ -225,6 +226,7 @@ model Company {
   costCenters           CostCenter[]
   payables              Payable[]
   financialTransactions FinancialTransaction[]
+  statementEntries      BankStatementEntry[]
 }
 
 model BankAccount {
@@ -243,6 +245,7 @@ model BankAccount {
   financialPayments     FinancialPayment[]
   payables              Payable[]
   financialTransactions FinancialTransaction[]
+  BankStatementEntry    BankStatementEntry[]
 }
 
 // ---------------------------------------------------------------------------
@@ -860,11 +863,40 @@ model FinancialTransaction {
   reversedAt     DateTime?
   createdAt      DateTime                 @default(now())
 
+  statementEntry BankStatementEntry?
+
   @@index([organizationId, date, type])
   @@index([organizationId, companyId, date])
   @@index([organizationId, developmentId, date])
   @@index([organizationId, costCenterId, date])
   @@index([organizationId, bankAccountId, date])
+}
+
+model BankStatementEntry {
+  id                   String                   @id @default(cuid())
+  organizationId       String
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  bankAccountId        String
+  bankAccount          BankAccount              @relation(fields: [bankAccountId], references: [id], onDelete: Cascade)
+  externalId           String?
+  fingerprint          String
+  date                 DateTime
+  description          String
+  type                 BankStatementEntryType
+  amount               Decimal                  @db.Decimal(18, 2)
+  status               BankReconciliationStatus @default(PENDENTE)
+  matchedTransactionId String?                  @unique
+  matchedTransaction   FinancialTransaction?    @relation(fields: [matchedTransactionId], references: [id], onDelete: SetNull)
+  reconciledAt         DateTime?
+  ignoredAt            DateTime?
+  importedAt           DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+  Company              Company?                 @relation(fields: [companyId], references: [id])
+  companyId            String?
+
+  @@unique([organizationId, bankAccountId, fingerprint])
+  @@index([organizationId, bankAccountId, status, date])
+  @@index([organizationId, status, date])
 }
 
 model PriceTable {
@@ -1174,4 +1206,15 @@ enum PayableSourceType {
 enum FinancialTransactionType {
   ENTRADA
   SAIDA
+}
+
+enum BankStatementEntryType {
+  CREDITO
+  DEBITO
+}
+
+enum BankReconciliationStatus {
+  PENDENTE
+  CONCILIADO
+  IGNORADO
 }

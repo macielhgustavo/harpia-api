@@ -7,6 +7,7 @@ import { FinancialSettingsService } from './financial-settings.service';
 import { FinancialSetupService } from './financial-setup.service';
 import { PayablesController } from './payables.controller';
 import { PayablesService } from './payables.service';
+import { BankReconciliationService } from './bank-reconciliation.service';
 
 @Module({
   imports: [PrismaModule, AuditModule],
@@ -16,6 +17,7 @@ import { PayablesService } from './payables.service';
     FinancialSettingsService,
     FinancialSetupService,
     PayablesService,
+    BankReconciliationService,
   ],
   exports: [FinancialSetupService, PayablesService],
 })

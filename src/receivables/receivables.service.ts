@@ -5,6 +5,7 @@ import {
   NotFoundException,
 } from '@nestjs/common';
 import {
+  BankReconciliationStatus,
   Prisma,
   ProposalPaymentConditionType,
   ReceivableSourceType,
@@ -393,9 +394,17 @@ export class ReceivablesService {
           reversalReason: dto.reason,
         },
       });
-      await tx.financialTransaction.update({
+      const transaction = await tx.financialTransaction.update({
         where: { paymentId: payment.id },
         data: { reversedAt },
+      });
+      const reconciliation = await tx.bankStatementEntry.updateMany({
+        where: { matchedTransactionId: transaction.id },
+        data: {
+          status: BankReconciliationStatus.PENDENTE,
+          matchedTransactionId: null,
+          reconciledAt: null,
+        },
       });
       await tx.receivable.update({
         where: { id: receivable.id },
@@ -419,6 +428,19 @@ export class ReceivablesService {
         },
         tx,
       );
+      if (reconciliation.count) {
+        await this.audit.record(
+          {
+            organizationId: actor.organizationId,
+            actorUserId: actor.id,
+            action: AUDIT_ACTIONS.BANK_TRANSACTION_UNMATCHED,
+            entityType: AUDIT_ENTITY_TYPES.FINANCIAL_TRANSACTION,
+            entityId: transaction.id,
+            metadata: { reason: 'PAYMENT_REVERSED' },
+          },
+          tx,
+        );
+      }
       await this.syncSaleStatus(tx, receivable.saleId, actor);
     });
 
@@ -812,8 +834,7 @@ export class ReceivablesService {
     `;
     if (
       !sale ||
-      sale.status !== SaleStatus.ATIVA &&
-      sale.status !== SaleStatus.QUITADA
+      (sale.status !== SaleStatus.ATIVA && sale.status !== SaleStatus.QUITADA)
     ) {
       return;
     }
