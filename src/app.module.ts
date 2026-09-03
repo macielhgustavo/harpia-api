@@ -30,6 +30,7 @@ import { SalesModule } from './sales/sales.module';
 import { ReceivablesModule } from './receivables/receivables.module';
 import { FinanceModule } from './finance/finance.module';
 import { CollectionsModule } from './collections/collections.module';
+import { MonetaryAdjustmentModule } from './monetary-adjustment/monetary-adjustment.module';
 
 @Module({
   imports: [
@@ -58,6 +59,7 @@ import { CollectionsModule } from './collections/collections.module';
     SalesModule,
     ReceivablesModule,
     FinanceModule,
+    MonetaryAdjustmentModule,
     CollectionsModule,
   ],
   controllers: [AppController],

@@ -1,4 +1,5 @@
 # Progresso — Harpia API
+- **[2026-09-02] — Correção monetária:** adicionado módulo de ajuste monetário com índices, valores, políticas e ajustes de recebíveis, incluindo endpoints para prévia e aplicação, com validação de permissões e integração ao módulo de recebíveis.
 
 - **[2026-09-02] — Cobrança automatizada:** adicionadas réguas configuráveis por dias antes/depois do vencimento, fila idempotente por parcela e data, processamento recorrente a cada 15 minutos, cancelamento automático para recebíveis quitados/cancelados e até três tentativas controladas. O envio usa Resend somente com credenciais server-side, chave de idempotência e histórico tenant-scoped; regras começam desativadas para evitar disparos acidentais.
 

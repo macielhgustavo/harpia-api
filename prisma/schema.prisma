@@ -56,6 +56,10 @@ model Organization {
   bankStatementEntries    BankStatementEntry[]
   collectionRules         CollectionRule[]
   collectionDispatches    CollectionDispatch[]
+  monetaryIndices         MonetaryIndex[]
+  monetaryIndexValues     MonetaryIndexValue[]
+  receivableAdjustmentPolicies   ReceivableAdjustmentPolicy[]
+  receivableAdjustments          ReceivableAdjustment[]
 }
 
 // ---------------------------------------------------------------------------
@@ -98,6 +102,8 @@ model User {
   financialPaymentsReversed FinancialPayment[]        @relation("FinancialPaymentReversedBy")
   createdAt                 DateTime                  @default(now())
   updatedAt                 DateTime                  @updatedAt
+  responsibleForMonetaryIndexValues   MonetaryIndexValue[] @relation("MonetaryIndexValue_responsible")
+  appliedMonetaryIndexAdjustments     ReceivableAdjustment[] @relation("ReceivableAdjustment_appliedBy")
 
   @@index([organizationId, role])
   @@index([organizationId, isActive])
@@ -718,6 +724,8 @@ model Receivable {
   payments             FinancialPayment[]
   transactions         FinancialTransaction[]
   collectionDispatches CollectionDispatch[]
+  adjustmentPolicies    ReceivableAdjustmentPolicy[]
+  adjustments           ReceivableAdjustment[]
 
   @@unique([organizationId, sourceType, sourceId, sourceSequence])
   @@index([organizationId, status, dueDate])
@@ -1277,4 +1285,84 @@ enum CollectionDispatchStatus {
   ENVIADO
   FALHOU
   CANCELADO
+}
+
+// ---------------------------------------------------------------------------
+// Correção monetária
+// ---------------------------------------------------------------------------
+
+model MonetaryIndex {
+  id            String   @id @default(cuid())
+  organization  Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+  name          String
+  code          String
+  description   String?
+  active        Boolean   @default(true)
+  periodicity   String    // e.g., MONTHLY, QUARTERLY, YEARLY
+  createdAt     DateTime  @default(now())
+  updatedAt     DateTime  @updatedAt
+
+  values        MonetaryIndexValue[]
+  receivableAdjustmentPolicies   ReceivableAdjustmentPolicy[]
+
+  @@unique([organizationId, name])
+  @@unique([organizationId, code])
+  @@index([organizationId, active])
+}
+
+model MonetaryIndexValue {
+  id             String   @id @default(cuid())
+  monetaryIndex  MonetaryIndex @relation(fields: [monetaryIndexId], references: [id], onDelete: Cascade)
+  monetaryIndexId String
+  organization   Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+  competence     DateTime   // year-month, we store the first day of the month
+  percentage     Decimal    @db.Decimal(5, 4) // e.g., 0.0075 for 0.75%
+  source         String?    // e.g., "IBGE", "BACEN"
+  publishedAt    DateTime?
+  responsibleId  String?    // User ID who entered the value
+  responsible    User?      @relation("MonetaryIndexValue_responsible", fields: [responsibleId], references: [id], onDelete: SetNull)
+  createdAt      DateTime  @default(now())
+  updatedAt      DateTime  @updatedAt
+
+  @@unique([organizationId, monetaryIndexId, competence])
+}
+
+model ReceivableAdjustmentPolicy {
+  id              String   @id @default(cuid())
+  receivable      Receivable @relation(fields: [receivableId], references: [id], onDelete: Cascade)
+  receivableId    String
+  organization    Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId String
+  monetaryIndex   MonetaryIndex @relation(fields: [monetaryIndexId], references: [id], onDelete: Restrict)
+  monetaryIndexId String
+  baseDate        DateTime   // date from which the index is applied
+  periodicity     String    // e.g., MONTHLY, QUARTERLY, YEARLY
+  lag             Int?      // number of periods to lag, if any
+  active          Boolean   @default(true)
+  createdAt       DateTime  @default(now())
+  updatedAt       DateTime  @updatedAt
+
+  @@unique([organizationId, receivableId])
+}
+model ReceivableAdjustment {
+  id                  String   @id @default(cuid())
+  receivable          Receivable @relation(fields: [receivableId], references: [id], onDelete: Cascade)
+  receivableId        String
+  organization        Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organizationId      String
+  previousAmount      Decimal   @db.Decimal(18, 2)
+  adjustedAmount      Decimal   @db.Decimal(18, 2)
+  difference          Decimal   @db.Decimal(18, 2)
+  startCompetence     DateTime  // competence period start
+  endCompetence       DateTime  // competence period end
+  indexValues         Json      // store the index values used for calculation (as JSON for simplicity)
+  appliedAt           DateTime?
+  appliedById         String?   // User ID who applied the adjustment
+  appliedBy           User?     @relation("ReceivableAdjustment_appliedBy", fields: [appliedById], references: [id], onDelete: SetNull)
+  createdAt           DateTime  @default(now())
+  updatedAt           DateTime  @updatedAt
+
+  @@index([organizationId, receivableId, appliedAt])
 }
