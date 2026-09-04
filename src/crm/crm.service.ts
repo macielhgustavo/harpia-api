@@ -560,13 +560,25 @@ export class CrmService {
       ...(query.type ? { type: query.type } : {}),
       ...(query.status ? { status: query.status } : {}),
       ...(query.priority ? { priority: query.priority } : {}),
+      ...(query.openOnly
+        ? {
+            status: {
+              in: [
+                SalesActivityStatus.PENDENTE,
+                SalesActivityStatus.EM_ANDAMENTO,
+              ],
+            },
+          }
+        : {}),
       ...(query.scheduledFrom || query.scheduledTo
         ? {
             scheduledAt: {
               ...(query.scheduledFrom
                 ? { gte: new Date(query.scheduledFrom) }
                 : {}),
-              ...(query.scheduledTo ? { lte: new Date(query.scheduledTo) } : {}),
+              ...(query.scheduledTo
+                ? { lte: new Date(query.scheduledTo) }
+                : {}),
             },
           }
         : {}),

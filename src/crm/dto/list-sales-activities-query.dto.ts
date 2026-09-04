@@ -3,8 +3,9 @@ import {
   SalesActivityStatus,
   SalesActivityType,
 } from '@prisma/client';
-import { Type } from 'class-transformer';
+import { Transform, Type } from 'class-transformer';
 import {
+  IsBoolean,
   IsDateString,
   IsEnum,
   IsInt,
@@ -46,6 +47,11 @@ export class ListSalesActivitiesQueryDto {
   @IsOptional()
   @IsDateString()
   scheduledTo?: string;
+
+  @IsOptional()
+  @Transform(({ value }) => value === true || value === 'true')
+  @IsBoolean()
+  openOnly?: boolean;
 
   @IsOptional()
   @Type(() => Number)
