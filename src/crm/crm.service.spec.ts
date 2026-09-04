@@ -350,6 +350,7 @@ describe('CrmService', () => {
         assignedUser: { id: 'user-1', name: 'Ana' },
       },
     ]);
+    prisma.salesVisit.findMany.mockResolvedValue([]);
     prisma.unitReservation.findMany.mockResolvedValue([]);
     prisma.salesProposal.findMany.mockResolvedValue([]);
     prisma.sale.findMany.mockResolvedValue([]);
@@ -416,6 +417,7 @@ function createPrismaMock(
     },
     opportunityStageHistory: { findMany: jest.fn() },
     salesActivity: { findMany: jest.fn(), count: jest.fn() },
+    salesVisit: { findMany: jest.fn() },
     unitReservation: { findMany: jest.fn() },
     salesProposal: { findMany: jest.fn() },
     sale: { findMany: jest.fn() },

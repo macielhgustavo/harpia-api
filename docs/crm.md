@@ -9,6 +9,7 @@ O CRM é isolado por organização em todas as tabelas e consultas. Nenhum endpo
 - `Opportunity`: oportunidade ligada a uma pessoa e, opcionalmente, a responsável, empreendimento e unidade.
 - `OpportunityStageHistory`: histórico comercial imutável das movimentações de etapa, incluindo a etapa inicial.
 - `SalesActivity`: ligação, e-mail, reunião, visita, tarefa ou anotação ligada à oportunidade e à sua pessoa, com status, prioridade, lembrete e resultado.
+- `SalesVisit`: visita imobiliária estruturada, ligada à oportunidade, pessoa, responsável, empreendimento e unidade, com agenda, duração, comparecimento e resultado.
 
 O pipeline padrão contém: Novo, Contato inicial, Qualificado, Visita, Proposta, Negociação, Ganho e Perdido.
 
@@ -23,6 +24,7 @@ O pipeline padrão contém: Novo, Contato inicial, Qualificado, Visita, Proposta
 - Quando a probabilidade não é informada na criação, ela herda a probabilidade padrão da etapa inicial.
 - Atividades possuem ciclo explícito (`PENDENTE`, `EM_ANDAMENTO`, `CONCLUIDA` ou `CANCELADA`) e prioridade (`BAIXA`, `NORMAL`, `ALTA` ou `URGENTE`). Ao concluir sem informar horário, o backend registra a conclusão; estados não concluídos não mantêm `completedAt`.
 - A listagem de atividades aceita filtros por status, prioridade e intervalo de agendamento, sempre no tenant da sessão.
+- Visitas começam agendadas; realização, ausência ou cancelamento preservam o marco temporal. Cancelamento exige motivo e resultado estruturado somente pode ser informado para visita realizada.
 - `estimatedValue` é recebido como string decimal canônica e armazenado como `Decimal(18,2)`. A API nunca usa ponto flutuante para dinheiro.
 - O histórico de etapa atende à operação comercial. O `AuditLog` append-only registra autoria e mutações para rastreabilidade.
 
@@ -38,5 +40,7 @@ Leitura exige `CRM_READ`; mutações exigem `CRM_WRITE`.
 - `GET /crm/opportunities/:id/timeline`
 - `GET|POST /crm/activities`
 - `PATCH|DELETE /crm/activities/:id`
+- `GET|POST /crm/visits`
+- `PATCH /crm/visits/:id`
 
 As listagens de oportunidades e atividades são paginadas no servidor, com limite de 100 registros por página.

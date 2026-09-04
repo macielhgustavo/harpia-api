@@ -548,7 +548,7 @@ export class CrmService {
 
   async findOpportunityTimeline(id: string, organizationId: string) {
     await this.assertOpportunityExists(id, organizationId);
-    const [stageHistory, activities, reservations, proposals, sales] =
+    const [stageHistory, activities, visits, reservations, proposals, sales] =
       await Promise.all([
         this.prisma.opportunityStageHistory.findMany({
           where: { opportunityId: id, organizationId },
@@ -562,6 +562,13 @@ export class CrmService {
           where: { opportunityId: id, organizationId },
           include: {
             assignedUser: { select: { id: true, name: true } },
+          },
+        }),
+        this.prisma.salesVisit.findMany({
+          where: { opportunityId: id, organizationId },
+          include: {
+            assignedUser: { select: { id: true, name: true } },
+            unit: { select: { identifier: true } },
           },
         }),
         this.prisma.unitReservation.findMany({
@@ -607,6 +614,17 @@ export class CrmService {
         occurredAt: item.completedAt ?? item.createdAt,
         title: item.summary || `Atividade ${item.type}`,
         description: item.result || item.notes,
+        status: item.status,
+        actor: item.assignedUser,
+      })),
+      ...visits.map((item) => ({
+        id: `visit:${item.id}`,
+        type: 'VISIT' as const,
+        occurredAt: item.completedAt ?? item.cancelledAt ?? item.scheduledAt,
+        title: item.unit
+          ? `Visita à unidade ${item.unit.identifier}`
+          : 'Visita comercial',
+        description: item.result || item.notes || item.location,
         status: item.status,
         actor: item.assignedUser,
       })),

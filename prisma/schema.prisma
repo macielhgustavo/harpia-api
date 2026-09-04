@@ -39,6 +39,7 @@ model Organization {
   opportunities                Opportunity[]
   opportunityStageHistory      OpportunityStageHistory[]
   salesActivities              SalesActivity[]
+  salesVisits                  SalesVisit[]
   unitReservations             UnitReservation[]
   salesProposals               SalesProposal[]
   proposalVersions             ProposalVersion[]
@@ -91,6 +92,8 @@ model User {
   assignedOpportunities             Opportunity[]             @relation("OpportunityAssignedUser")
   opportunityStageChanges           OpportunityStageHistory[] @relation("OpportunityStageChangedBy")
   assignedSalesActivities           SalesActivity[]           @relation("SalesActivityAssignedUser")
+  assignedSalesVisits               SalesVisit[]              @relation("SalesVisitAssignedUser")
+  salesVisitsCreated                SalesVisit[]              @relation("SalesVisitCreatedBy")
   reservationsCreated               UnitReservation[]         @relation("UnitReservationCreatedBy")
   reservationsCancelled             UnitReservation[]         @relation("UnitReservationCancelledBy")
   reservationsConverted             UnitReservation[]         @relation("UnitReservationConvertedBy")
@@ -197,6 +200,7 @@ model Person {
   interactions     Interaction[]
   opportunities    Opportunity[]
   salesActivities  SalesActivity[]
+  salesVisits      SalesVisit[]
   unitReservations UnitReservation[]
   salesProposals   SalesProposal[]
   saleBuyers       SaleBuyer[]
@@ -239,6 +243,7 @@ model Company {
   costCenters           CostCenter[]
   payables              Payable[]
   financialTransactions FinancialTransaction[]
+  salesVisits           SalesVisit[]
   statementEntries      BankStatementEntry[]
 }
 
@@ -292,6 +297,7 @@ model Development {
   costCenters           CostCenter[]
   payables              Payable[]
   financialTransactions FinancialTransaction[]
+  SalesVisit            SalesVisit[]
 }
 
 model UnitType {
@@ -335,6 +341,7 @@ model Unit {
   reservations   UnitReservation[]
   salesProposals SalesProposal[]
   sales          Sale[]
+  salesVisits    SalesVisit[]
 }
 
 // ---------------------------------------------------------------------------
@@ -412,6 +419,7 @@ model Opportunity {
 
   stageHistory   OpportunityStageHistory[]
   activities     SalesActivity[]
+  visits         SalesVisit[]
   reservations   UnitReservation[]
   salesProposals SalesProposal[]
   sales          Sale[]
@@ -472,6 +480,44 @@ model SalesActivity {
   @@index([organizationId, status, scheduledAt])
   @@index([organizationId, reminderAt])
   @@index([organizationId, completedAt, scheduledAt])
+}
+
+model SalesVisit {
+  id                 String             @id @default(cuid())
+  organizationId     String
+  organization       Organization       @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  opportunityId      String
+  opportunity        Opportunity        @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  personId           String
+  person             Person             @relation(fields: [personId], references: [id], onDelete: Restrict)
+  assignedUserId     String?
+  assignedUser       User?              @relation("SalesVisitAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  createdByUserId    String
+  createdByUser      User               @relation("SalesVisitCreatedBy", fields: [createdByUserId], references: [id], onDelete: Restrict)
+  developmentId      String?
+  development        Development?       @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  unitId             String?
+  unit               Unit?              @relation(fields: [unitId], references: [id], onDelete: SetNull)
+  scheduledAt        DateTime
+  durationMinutes    Int                @default(60)
+  status             SalesVisitStatus   @default(AGENDADA)
+  outcome            SalesVisitOutcome?
+  location           String?
+  result             String?
+  notes              String?
+  completedAt        DateTime?
+  cancelledAt        DateTime?
+  cancellationReason String?
+  createdAt          DateTime           @default(now())
+  updatedAt          DateTime           @updatedAt
+  Company            Company?           @relation(fields: [companyId], references: [id])
+  companyId          String?
+
+  @@index([organizationId, scheduledAt])
+  @@index([organizationId, status, scheduledAt])
+  @@index([organizationId, assignedUserId, scheduledAt])
+  @@index([organizationId, opportunityId, scheduledAt])
+  @@index([organizationId, personId, scheduledAt])
 }
 
 // ---------------------------------------------------------------------------
@@ -1237,6 +1283,21 @@ enum SalesActivityPriority {
   NORMAL
   ALTA
   URGENTE
+}
+
+enum SalesVisitStatus {
+  AGENDADA
+  REALIZADA
+  CANCELADA
+  NAO_COMPARECEU
+}
+
+enum SalesVisitOutcome {
+  INTERESSE_ALTO
+  INTERESSE_MEDIO
+  INTERESSE_BAIXO
+  SEM_INTERESSE
+  REAGENDAR
 }
 
 enum UnitReservationStatus {
