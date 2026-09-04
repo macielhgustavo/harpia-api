@@ -359,19 +359,20 @@ model SalesPipeline {
 }
 
 model SalesStage {
-  id             String        @id @default(cuid())
-  organizationId String
-  organization   Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
-  pipelineId     String
-  pipeline       SalesPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
-  name           String
-  code           String
-  position       Int
-  colorKey       String
-  isWon          Boolean       @default(false)
-  isLost         Boolean       @default(false)
-  createdAt      DateTime      @default(now())
-  updatedAt      DateTime      @updatedAt
+  id                 String        @id @default(cuid())
+  organizationId     String
+  organization       Organization  @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  pipelineId         String
+  pipeline           SalesPipeline @relation(fields: [pipelineId], references: [id], onDelete: Cascade)
+  name               String
+  code               String
+  position           Int
+  colorKey           String
+  defaultProbability Int           @default(0)
+  isWon              Boolean       @default(false)
+  isLost             Boolean       @default(false)
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
 
   opportunities Opportunity[]
   historyFrom   OpportunityStageHistory[] @relation("OpportunityHistoryFromStage")
@@ -405,6 +406,7 @@ model Opportunity {
   expectedCloseDate DateTime?
   lostReason        String?
   notes             String?
+  stageEnteredAt    DateTime      @default(now())
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
@@ -421,6 +423,7 @@ model Opportunity {
   @@index([organizationId, personId, createdAt])
   @@index([organizationId, unitId])
   @@index([organizationId, nextContactAt])
+  @@index([organizationId, stageId, stageEnteredAt])
 }
 
 model OpportunityStageHistory {

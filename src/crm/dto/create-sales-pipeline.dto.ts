@@ -10,6 +10,7 @@ import {
   IsString,
   Matches,
   MaxLength,
+  Max,
   Min,
   ValidateNested,
 } from 'class-validator';
@@ -31,6 +32,12 @@ export class CreateSalesStageDto {
   @IsString()
   @Matches(/^[a-z][a-z0-9-]{1,29}$/)
   colorKey: string;
+
+  @IsOptional()
+  @IsInt()
+  @Min(0)
+  @Max(100)
+  defaultProbability?: number;
 
   @IsOptional()
   @IsBoolean()

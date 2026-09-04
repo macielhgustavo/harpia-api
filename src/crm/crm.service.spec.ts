@@ -32,6 +32,7 @@ describe('CrmService', () => {
       id: 'stage-1',
       isWon: false,
       isLost: false,
+      defaultProbability: 15,
     });
     tx.user.findFirst.mockResolvedValue({ id: 'user-2' });
     tx.development.findFirst.mockResolvedValue({ id: 'development-1' });
@@ -44,6 +45,12 @@ describe('CrmService', () => {
       developmentId: 'development-1',
       estimatedValue: '125000.50',
     });
+
+    expect(tx.opportunity.create).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({ probability: 15 }),
+      }),
+    );
 
     expect(tx.person.findFirst).toHaveBeenCalledWith({
       where: { id: 'person-1', organizationId: 'org-a' },
@@ -144,6 +151,15 @@ describe('CrmService', () => {
     await service.moveOpportunity('opportunity-1', actor, {
       stageId: 'stage-won',
     });
+
+    expect(tx.opportunity.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          stageId: 'stage-won',
+          stageEnteredAt: expect.any(Date),
+        }),
+      }),
+    );
 
     expect(tx.salesStage.findFirst).toHaveBeenCalledWith({
       where: {

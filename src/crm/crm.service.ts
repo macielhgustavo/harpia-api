@@ -44,32 +44,54 @@ interface LockedActivity {
 }
 
 const DEFAULT_STAGES: readonly CreateSalesStageDto[] = [
-  { name: 'Novo', code: 'NOVO', position: 0, colorKey: 'slate' },
+  {
+    name: 'Novo',
+    code: 'NOVO',
+    position: 0,
+    colorKey: 'slate',
+    defaultProbability: 5,
+  },
   {
     name: 'Contato inicial',
     code: 'CONTATO_INICIAL',
     position: 1,
     colorKey: 'blue',
+    defaultProbability: 15,
   },
   {
     name: 'Qualificado',
     code: 'QUALIFICADO',
     position: 2,
     colorKey: 'cyan',
+    defaultProbability: 30,
   },
-  { name: 'Visita', code: 'VISITA', position: 3, colorKey: 'violet' },
-  { name: 'Proposta', code: 'PROPOSTA', position: 4, colorKey: 'amber' },
+  {
+    name: 'Visita',
+    code: 'VISITA',
+    position: 3,
+    colorKey: 'violet',
+    defaultProbability: 50,
+  },
+  {
+    name: 'Proposta',
+    code: 'PROPOSTA',
+    position: 4,
+    colorKey: 'amber',
+    defaultProbability: 70,
+  },
   {
     name: 'Negociação',
     code: 'NEGOCIACAO',
     position: 5,
     colorKey: 'orange',
+    defaultProbability: 85,
   },
   {
     name: 'Ganho',
     code: 'GANHO',
     position: 6,
     colorKey: 'green',
+    defaultProbability: 100,
     isWon: true,
   },
   {
@@ -77,6 +99,7 @@ const DEFAULT_STAGES: readonly CreateSalesStageDto[] = [
     code: 'PERDIDO',
     position: 7,
     colorKey: 'red',
+    defaultProbability: 0,
     isLost: true,
   },
 ];
@@ -152,6 +175,7 @@ export class CrmService {
               code: stage.code,
               position: stage.position,
               colorKey: stage.colorKey,
+              defaultProbability: stage.defaultProbability ?? 0,
               isWon: stage.isWon ?? false,
               isLost: stage.isLost ?? false,
             })),
@@ -295,7 +319,7 @@ export class CrmService {
           unitId: target.unitId,
           source: dto.source || null,
           estimatedValue: this.decimalOrNull(dto.estimatedValue),
-          probability: dto.probability,
+          probability: dto.probability ?? stage.defaultProbability,
           nextContactAt: this.dateOrNull(dto.nextContactAt),
           expectedCloseDate: this.dateOrNull(dto.expectedCloseDate),
           notes: dto.notes || null,
@@ -462,6 +486,7 @@ export class CrmService {
         data: {
           stageId: stage.id,
           lostReason: stage.isLost ? dto.lostReason!.trim() : null,
+          stageEnteredAt: new Date(),
         },
         include: OPPORTUNITY_INCLUDE,
       });
