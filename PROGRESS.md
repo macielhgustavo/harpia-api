@@ -1,4 +1,6 @@
 # Progresso — Harpia API
+- **[2026-09-04] — CRM fase C1, atividades profissionais:** atividades comerciais agora possuem status explícito, prioridade, lembrete e resultado, com compatibilidade para registros concluídos antigos. Criação e atualização mantêm status e data de conclusão coerentes, e a agenda pode ser filtrada por responsável, tipo, status, prioridade e período.
+
 - **[2026-09-04] — CRM fase B1, base do pipeline gerencial:** etapas comerciais agora possuem probabilidade padrão e oportunidades registram a data de entrada na etapa. A criação herda a probabilidade da etapa quando não houver valor manual; movimentações atualizam o marco temporal sob o lock transacional já existente. A migration preserva dados e recompõe o tempo de etapa a partir do histórico mais recente.
 
 - **[2026-09-02] — Correção monetária:** adicionado módulo de ajuste monetário com índices, valores, políticas e ajustes de recebíveis, incluindo endpoints para prévia e aplicação, com validação de permissões e integração ao módulo de recebíveis.

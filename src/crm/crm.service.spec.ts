@@ -1,5 +1,10 @@
 import { BadRequestException, NotFoundException } from '@nestjs/common';
-import { PersonRoleType, SalesActivityType } from '@prisma/client';
+import {
+  PersonRoleType,
+  SalesActivityPriority,
+  SalesActivityStatus,
+  SalesActivityType,
+} from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
@@ -231,16 +236,51 @@ describe('CrmService', () => {
     });
     const activityCalls = tx.salesActivity.create.mock.calls as unknown[][];
     const activityInput = activityCalls[0][0] as {
-      data: { organizationId: string; personId: string };
+      data: {
+        organizationId: string;
+        personId: string;
+        status: SalesActivityStatus;
+      };
     };
     expect(activityInput.data.organizationId).toBe('org-a');
     expect(activityInput.data.personId).toBe('person-1');
+    expect(activityInput.data.status).toBe(SalesActivityStatus.PENDENTE);
     expect(audit.record).toHaveBeenCalledWith(
       expect.objectContaining({
         action: AUDIT_ACTIONS.SALES_ACTIVITY_CREATED,
         entityId: 'activity-1',
       }),
       tx,
+    );
+  });
+
+  it('completes an activity with a consistent status and timestamp', async () => {
+    tx.$queryRaw.mockResolvedValue([
+      {
+        id: 'activity-1',
+        assignedUserId: null,
+        status: SalesActivityStatus.PENDENTE,
+        scheduledAt: null,
+        completedAt: null,
+      },
+    ]);
+    tx.salesActivity.update.mockResolvedValue({ id: 'activity-1' });
+
+    await service.updateActivity('activity-1', actor, {
+      status: SalesActivityStatus.CONCLUIDA,
+      priority: SalesActivityPriority.ALTA,
+      result: 'Cliente confirmou interesse.',
+    });
+
+    expect(tx.salesActivity.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: SalesActivityStatus.CONCLUIDA,
+          priority: SalesActivityPriority.ALTA,
+          completedAt: expect.any(Date),
+          result: 'Cliente confirmou interesse.',
+        }),
+      }),
     );
   });
 

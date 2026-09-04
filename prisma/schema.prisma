@@ -445,26 +445,32 @@ model OpportunityStageHistory {
 }
 
 model SalesActivity {
-  id             String            @id @default(cuid())
+  id             String                @id @default(cuid())
   organizationId String
-  organization   Organization      @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  organization   Organization          @relation(fields: [organizationId], references: [id], onDelete: Cascade)
   opportunityId  String
-  opportunity    Opportunity       @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  opportunity    Opportunity           @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
   personId       String
-  person         Person            @relation(fields: [personId], references: [id], onDelete: Restrict)
+  person         Person                @relation(fields: [personId], references: [id], onDelete: Restrict)
   assignedUserId String?
-  assignedUser   User?             @relation("SalesActivityAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
+  assignedUser   User?                 @relation("SalesActivityAssignedUser", fields: [assignedUserId], references: [id], onDelete: SetNull)
   type           SalesActivityType
+  status         SalesActivityStatus   @default(PENDENTE)
+  priority       SalesActivityPriority @default(NORMAL)
   scheduledAt    DateTime?
+  reminderAt     DateTime?
   completedAt    DateTime?
   summary        String?
   notes          String?
-  createdAt      DateTime          @default(now())
-  updatedAt      DateTime          @updatedAt
+  result         String?
+  createdAt      DateTime              @default(now())
+  updatedAt      DateTime              @updatedAt
 
   @@index([organizationId, opportunityId, createdAt])
   @@index([organizationId, personId, createdAt])
   @@index([organizationId, assignedUserId, scheduledAt])
+  @@index([organizationId, status, scheduledAt])
+  @@index([organizationId, reminderAt])
   @@index([organizationId, completedAt, scheduledAt])
 }
 
@@ -1217,6 +1223,20 @@ enum SalesActivityType {
   VISITA
   FOLLOW_UP
   OUTRO
+}
+
+enum SalesActivityStatus {
+  PENDENTE
+  EM_ANDAMENTO
+  CONCLUIDA
+  CANCELADA
+}
+
+enum SalesActivityPriority {
+  BAIXA
+  NORMAL
+  ALTA
+  URGENTE
 }
 
 enum UnitReservationStatus {

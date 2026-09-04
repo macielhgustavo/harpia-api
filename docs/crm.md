@@ -8,7 +8,7 @@ O CRM é isolado por organização em todas as tabelas e consultas. Nenhum endpo
 - `SalesStage`: etapa ordenada do funil, com probabilidade padrão. Cada pipeline possui exatamente uma etapa ganha e uma perdida.
 - `Opportunity`: oportunidade ligada a uma pessoa e, opcionalmente, a responsável, empreendimento e unidade.
 - `OpportunityStageHistory`: histórico comercial imutável das movimentações de etapa, incluindo a etapa inicial.
-- `SalesActivity`: ligação, e-mail, reunião, visita, tarefa ou anotação ligada à oportunidade e à sua pessoa.
+- `SalesActivity`: ligação, e-mail, reunião, visita, tarefa ou anotação ligada à oportunidade e à sua pessoa, com status, prioridade, lembrete e resultado.
 
 O pipeline padrão contém: Novo, Contato inicial, Qualificado, Visita, Proposta, Negociação, Ganho e Perdido.
 
@@ -21,6 +21,8 @@ O pipeline padrão contém: Novo, Contato inicial, Qualificado, Visita, Proposta
 - Mover para Perdido exige motivo; Ganho e Perdido geram eventos de auditoria próprios.
 - A oportunidade registra `stageEnteredAt` em cada movimentação, permitindo calcular tempo na etapa sem consultas N+1 ao histórico.
 - Quando a probabilidade não é informada na criação, ela herda a probabilidade padrão da etapa inicial.
+- Atividades possuem ciclo explícito (`PENDENTE`, `EM_ANDAMENTO`, `CONCLUIDA` ou `CANCELADA`) e prioridade (`BAIXA`, `NORMAL`, `ALTA` ou `URGENTE`). Ao concluir sem informar horário, o backend registra a conclusão; estados não concluídos não mantêm `completedAt`.
+- A listagem de atividades aceita filtros por status, prioridade e intervalo de agendamento, sempre no tenant da sessão.
 - `estimatedValue` é recebido como string decimal canônica e armazenado como `Decimal(18,2)`. A API nunca usa ponto flutuante para dinheiro.
 - O histórico de etapa atende à operação comercial. O `AuditLog` append-only registra autoria e mutações para rastreabilidade.
 

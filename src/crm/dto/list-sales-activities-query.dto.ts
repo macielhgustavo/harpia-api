@@ -1,6 +1,18 @@
-import { SalesActivityType } from '@prisma/client';
+import {
+  SalesActivityPriority,
+  SalesActivityStatus,
+  SalesActivityType,
+} from '@prisma/client';
 import { Type } from 'class-transformer';
-import { IsEnum, IsInt, IsOptional, IsString, Max, Min } from 'class-validator';
+import {
+  IsDateString,
+  IsEnum,
+  IsInt,
+  IsOptional,
+  IsString,
+  Max,
+  Min,
+} from 'class-validator';
 
 export class ListSalesActivitiesQueryDto {
   @IsOptional()
@@ -18,6 +30,22 @@ export class ListSalesActivitiesQueryDto {
   @IsOptional()
   @IsEnum(SalesActivityType)
   type?: SalesActivityType;
+
+  @IsOptional()
+  @IsEnum(SalesActivityStatus)
+  status?: SalesActivityStatus;
+
+  @IsOptional()
+  @IsEnum(SalesActivityPriority)
+  priority?: SalesActivityPriority;
+
+  @IsOptional()
+  @IsDateString()
+  scheduledFrom?: string;
+
+  @IsOptional()
+  @IsDateString()
+  scheduledTo?: string;
 
   @IsOptional()
   @Type(() => Number)

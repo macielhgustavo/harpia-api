@@ -4,7 +4,7 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { PersonRoleType, Prisma } from '@prisma/client';
+import { PersonRoleType, Prisma, SalesActivityStatus } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditEntry, AuditService } from '../audit/audit.service';
 import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
@@ -39,6 +39,7 @@ interface LockedOpportunity {
 interface LockedActivity {
   id: string;
   assignedUserId: string | null;
+  status: SalesActivityStatus;
   scheduledAt: Date | null;
   completedAt: Date | null;
 }
@@ -557,6 +558,18 @@ export class CrmService {
       ...(query.personId ? { personId: query.personId } : {}),
       ...(query.assignedUserId ? { assignedUserId: query.assignedUserId } : {}),
       ...(query.type ? { type: query.type } : {}),
+      ...(query.status ? { status: query.status } : {}),
+      ...(query.priority ? { priority: query.priority } : {}),
+      ...(query.scheduledFrom || query.scheduledTo
+        ? {
+            scheduledAt: {
+              ...(query.scheduledFrom
+                ? { gte: new Date(query.scheduledFrom) }
+                : {}),
+              ...(query.scheduledTo ? { lte: new Date(query.scheduledTo) } : {}),
+            },
+          }
+        : {}),
     };
     const [data, total] = await Promise.all([
       this.prisma.salesActivity.findMany({
@@ -600,7 +613,17 @@ export class CrmService {
         dto.assignedUserId,
         actor.organizationId,
       );
-      this.assertActivityDates(dto.scheduledAt, dto.completedAt);
+      const status =
+        dto.status ??
+        (dto.completedAt
+          ? SalesActivityStatus.CONCLUIDA
+          : SalesActivityStatus.PENDENTE);
+      const completedAt =
+        status === SalesActivityStatus.CONCLUIDA
+          ? (this.dateOrNull(dto.completedAt) ?? new Date())
+          : this.dateOrNull(dto.completedAt);
+      this.assertActivityDates(dto.scheduledAt, completedAt);
+      this.assertActivityCompletion(status, completedAt);
       const activity = await tx.salesActivity.create({
         data: {
           organizationId: actor.organizationId,
@@ -608,10 +631,14 @@ export class CrmService {
           personId: opportunity.personId,
           assignedUserId: dto.assignedUserId,
           type: dto.type,
+          status,
+          priority: dto.priority,
           scheduledAt: this.dateOrNull(dto.scheduledAt),
-          completedAt: this.dateOrNull(dto.completedAt),
+          reminderAt: this.dateOrNull(dto.reminderAt),
+          completedAt,
           summary: dto.summary || null,
           notes: dto.notes || null,
+          result: dto.result || null,
         },
         include: ACTIVITY_INCLUDE,
       });
@@ -652,7 +679,21 @@ export class CrmService {
         dto.completedAt === undefined
           ? current.completedAt
           : this.dateOrNull(dto.completedAt);
-      this.assertActivityDates(scheduledAt, completedAt);
+      const status =
+        dto.status ??
+        (dto.completedAt !== undefined
+          ? completedAt
+            ? SalesActivityStatus.CONCLUIDA
+            : SalesActivityStatus.PENDENTE
+          : current.status);
+      const normalizedCompletedAt =
+        status === SalesActivityStatus.CONCLUIDA
+          ? (completedAt ?? new Date())
+          : dto.status !== undefined
+            ? null
+            : completedAt;
+      this.assertActivityDates(scheduledAt, normalizedCompletedAt);
+      this.assertActivityCompletion(status, normalizedCompletedAt);
       const changedFields = Object.keys(dto).filter(
         (field) => dto[field as keyof UpdateSalesActivityDto] !== undefined,
       );
@@ -661,10 +702,17 @@ export class CrmService {
         data: {
           assignedUserId: dto.assignedUserId,
           type: dto.type,
+          status,
+          priority: dto.priority,
           scheduledAt,
-          completedAt,
+          reminderAt:
+            dto.reminderAt === undefined
+              ? undefined
+              : this.dateOrNull(dto.reminderAt),
+          completedAt: normalizedCompletedAt,
           summary: dto.summary,
           notes: dto.notes,
+          result: dto.result,
         },
         include: ACTIVITY_INCLUDE,
       });
@@ -861,7 +909,7 @@ export class CrmService {
     organizationId: string,
   ) {
     const [activity] = await tx.$queryRaw<LockedActivity[]>`
-      SELECT "id", "assignedUserId", "scheduledAt", "completedAt"
+      SELECT "id", "assignedUserId", "status", "scheduledAt", "completedAt"
       FROM "SalesActivity"
       WHERE "id" = ${id} AND "organizationId" = ${organizationId}
       FOR UPDATE
@@ -888,6 +936,17 @@ export class CrmService {
     if (new Date(completedAt) < new Date(scheduledAt)) {
       throw new BadRequestException(
         'A conclusão não pode ser anterior ao agendamento',
+      );
+    }
+  }
+
+  private assertActivityCompletion(
+    status: SalesActivityStatus,
+    completedAt: string | Date | null | undefined,
+  ) {
+    if (completedAt && status !== SalesActivityStatus.CONCLUIDA) {
+      throw new BadRequestException(
+        'Uma atividade com conclusão deve possuir status concluída',
       );
     }
   }

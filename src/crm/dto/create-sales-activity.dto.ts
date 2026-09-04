@@ -1,4 +1,8 @@
-import { SalesActivityType } from '@prisma/client';
+import {
+  SalesActivityPriority,
+  SalesActivityStatus,
+  SalesActivityType,
+} from '@prisma/client';
 import { Transform } from 'class-transformer';
 import {
   IsDateString,
@@ -27,8 +31,20 @@ export class CreateSalesActivityDto {
   type: SalesActivityType;
 
   @IsOptional()
+  @IsEnum(SalesActivityStatus)
+  status?: SalesActivityStatus;
+
+  @IsOptional()
+  @IsEnum(SalesActivityPriority)
+  priority?: SalesActivityPriority;
+
+  @IsOptional()
   @IsDateString()
   scheduledAt?: string;
+
+  @IsOptional()
+  @IsDateString()
+  reminderAt?: string;
 
   @IsOptional()
   @IsDateString()
@@ -45,4 +61,10 @@ export class CreateSalesActivityDto {
   @IsString()
   @MaxLength(4000)
   notes?: string;
+
+  @IsOptional()
+  @Transform(trim)
+  @IsString()
+  @MaxLength(2000)
+  result?: string;
 }
