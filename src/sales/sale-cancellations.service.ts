@@ -11,6 +11,7 @@ import {
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
+import { NotificationService } from '../notification/notification.service';
 import { CancelSaleDto } from './dto/cancel-sale.dto';
 import { SalesService } from './sales.service';
 
@@ -22,6 +23,7 @@ export class SaleCancellationsService {
     private readonly prisma: PrismaService,
     private readonly audit: AuditService,
     private readonly sales: SalesService,
+    private readonly notifications: NotificationService,
   ) {}
 
   async cancel(id: string, actor: Actor, dto: CancelSaleDto) {
@@ -123,6 +125,19 @@ export class SaleCancellationsService {
       },
       { isolationLevel: Prisma.TransactionIsolationLevel.Serializable },
     );
+    await this.notifications
+      .createForUser(
+        actor.organizationId,
+        {
+          recipientUserId: actor.id,
+          title: 'Distrato conclu\u00eddo',
+          message: `A venda foi distratada com sucesso. Motivo registrado: ${dto.reason.trim()}`,
+          type: 'SALE_CANCELLED',
+          data: { saleId: id },
+        },
+        actor.id,
+      )
+      .catch(() => undefined);
     return this.sales.findOne(id, actor.organizationId);
   }
 }

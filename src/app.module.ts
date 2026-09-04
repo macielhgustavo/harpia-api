@@ -31,6 +31,7 @@ import { ReceivablesModule } from './receivables/receivables.module';
 import { FinanceModule } from './finance/finance.module';
 import { CollectionsModule } from './collections/collections.module';
 import { MonetaryAdjustmentModule } from './monetary-adjustment/monetary-adjustment.module';
+import { NotificationModule } from './notification/notification.module';
 
 @Module({
   imports: [
@@ -61,6 +62,7 @@ import { MonetaryAdjustmentModule } from './monetary-adjustment/monetary-adjustm
     FinanceModule,
     MonetaryAdjustmentModule,
     CollectionsModule,
+    NotificationModule,
   ],
   controllers: [AppController],
   providers: [
