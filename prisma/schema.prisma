@@ -44,6 +44,7 @@ model Organization {
   proposalVersions        ProposalVersion[]
   proposalConditions      ProposalPaymentCondition[]
   sales                   Sale[]
+  saleCancellations       SaleCancellation[]
   saleBuyers              SaleBuyer[]
   salePaymentPlans        SalePaymentPlan[]
   saleCommissions         SaleCommission[]
@@ -97,6 +98,7 @@ model User {
   proposalVersionsCreated   ProposalVersion[]         @relation("ProposalVersionCreatedBy")
   proposalsConverted        SalesProposal[]           @relation("SalesProposalConvertedBy")
   salesCreated              Sale[]                    @relation("SaleCreatedBy")
+  salesCancelled            SaleCancellation[]        @relation("SaleCancellationCancelledBy")
   saleCommissions           SaleCommission[]          @relation("SaleCommissionUser")
   financialPaymentsCreated  FinancialPayment[]        @relation("FinancialPaymentCreatedBy")
   financialPaymentsReversed FinancialPayment[]        @relation("FinancialPaymentReversedBy")
@@ -622,12 +624,28 @@ model Sale {
   paymentPlan SalePaymentPlan[]
   commissions SaleCommission[]
   receivables Receivable[]
+  cancellation SaleCancellation?
 
   @@unique([organizationId, saleNumber])
   @@index([organizationId, status, saleDate])
   @@index([organizationId, developmentId, saleDate])
   @@index([organizationId, unitId, status])
   @@index([organizationId, opportunityId])
+}
+
+model SaleCancellation {
+  id                String       @id @default(cuid())
+  organizationId    String
+  organization      Organization @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  saleId            String       @unique
+  sale              Sale         @relation(fields: [saleId], references: [id], onDelete: Restrict)
+  reason            String
+  cancelledByUserId String
+  cancelledByUser   User         @relation("SaleCancellationCancelledBy", fields: [cancelledByUserId], references: [id], onDelete: Restrict)
+  createdAt         DateTime     @default(now())
+
+  @@index([organizationId, createdAt])
+  @@index([organizationId, cancelledByUserId])
 }
 
 model SaleBuyer {
@@ -1365,4 +1383,5 @@ model ReceivableAdjustment {
   updatedAt           DateTime  @updatedAt
 
   @@index([organizationId, receivableId, appliedAt])
+  @@unique([organizationId, receivableId, startCompetence, endCompetence])
 }

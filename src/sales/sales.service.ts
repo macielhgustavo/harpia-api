@@ -118,6 +118,9 @@ const SALE_INCLUDE = {
     },
     orderBy: { createdAt: 'asc' as const },
   },
+  cancellation: {
+    include: { cancelledByUser: { select: { id: true, name: true } } },
+  },
   receivables: {
     select: {
       id: true,

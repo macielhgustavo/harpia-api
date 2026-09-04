@@ -99,6 +99,9 @@ CREATE TABLE "ReceivableAdjustment" (
 -- CreateIndex: ReceivableAdjustment_organizationId_receivableId_appliedAt_index
 CREATE INDEX "ReceivableAdjustment_organizationId_receivableId_appliedAt_index" ON "ReceivableAdjustment"("organizationId", "receivableId", "appliedAt");
 
+-- Prevent applying the same index period twice to one receivable.
+CREATE UNIQUE INDEX "ReceivableAdjustment_organizationId_receivableId_startCompetence_endCompetence_key" ON "ReceivableAdjustment"("organizationId", "receivableId", "startCompetence", "endCompetence");
+
 -- AddForeignKey: ReceivableAdjustment_receivableId_fkey
 ALTER TABLE "ReceivableAdjustment" ADD CONSTRAINT "ReceivableAdjustment_receivableId_fkey" FOREIGN KEY ("receivableId") REFERENCES "Receivable"("id") ON DELETE CASCADE ON UPDATE CASCADE;
 

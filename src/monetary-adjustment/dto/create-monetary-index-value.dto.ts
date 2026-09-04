@@ -1,11 +1,13 @@
-import { IsDateString, IsOptional, IsNumber, MaxLength } from 'class-validator';
+import { IsDateString, IsNumber, IsOptional, IsString, Matches, Max, MaxLength, Min } from 'class-validator';
 
 export class CreateMonetaryIndexValueDto {
-  @IsDateString()
-  competence: string; // YYYY-MM-DD
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/)
+  competence: string;
 
   @IsNumber()
-  percentage: number; // e.g., 0.0075 for 0.75%
+  @Min(-0.9999)
+  @Max(9.9999)
+  percentage: number;
 
   @IsOptional()
   @IsString()

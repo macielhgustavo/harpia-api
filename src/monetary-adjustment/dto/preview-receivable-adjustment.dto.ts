@@ -1,12 +1,9 @@
-import { IsDateString, IsObject } from 'class-validator';
+import { Matches } from 'class-validator';
 
 export class PreviewReceivableAdjustmentDto {
-  @IsDateString()
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/)
   startCompetence: string;
 
-  @IsDateString()
+  @Matches(/^\d{4}-(0[1-9]|1[0-2])$/)
   endCompetence: string;
-
-  @IsObject()
-  indexValues: Record<string, number>;
 }

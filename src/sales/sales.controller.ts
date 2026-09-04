@@ -11,9 +11,11 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../auth/permissions/permissions';
 import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { CreateSaleCommissionDto } from './dto/create-sale-commission.dto';
+import { CancelSaleDto } from './dto/cancel-sale.dto';
 import { ListSalesQueryDto } from './dto/list-sales-query.dto';
 import { UpdateSaleDto } from './dto/update-sale.dto';
 import { SalesService } from './sales.service';
+import { SaleCancellationsService } from './sale-cancellations.service';
 
 interface AuthUser {
   id: string;
@@ -23,7 +25,10 @@ interface AuthUser {
 @RequirePermissions(PERMISSIONS.SALES_READ)
 @Controller('sales')
 export class SalesController {
-  constructor(private readonly sales: SalesService) {}
+  constructor(
+    private readonly sales: SalesService,
+    private readonly cancellations: SaleCancellationsService,
+  ) {}
 
   @Get()
   findAll(@CurrentUser() user: AuthUser, @Query() query: ListSalesQueryDto) {
@@ -43,6 +48,16 @@ export class SalesController {
     @Body() dto: UpdateSaleDto,
   ) {
     return this.sales.update(id, user, dto);
+  }
+
+  @RequirePermissions(PERMISSIONS.SALES_WRITE)
+  @Post(':id/cancel')
+  cancel(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: CancelSaleDto,
+  ) {
+    return this.cancellations.cancel(id, user, dto);
   }
 
   @RequirePermissions(PERMISSIONS.SALES_WRITE)

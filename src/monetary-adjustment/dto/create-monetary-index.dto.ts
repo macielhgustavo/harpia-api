@@ -1,4 +1,4 @@
-import { IsBoolean, IsOptional, IsString, MaxLength } from 'class-validator';
+import { IsBoolean, IsIn, IsOptional, IsString, MaxLength } from 'class-validator';
 
 export class CreateMonetaryIndexDto {
   @IsString()
@@ -18,6 +18,6 @@ export class CreateMonetaryIndexDto {
   @IsBoolean()
   active?: boolean = true;
 
-  @IsString()
-  periodicity: string; // e.g., MONTHLY, QUARTERLY, YEARLY
+  @IsIn(['MONTHLY', 'QUARTERLY', 'YEARLY'])
+  periodicity: string;
 }
