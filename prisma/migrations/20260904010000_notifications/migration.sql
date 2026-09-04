@@ -63,8 +63,8 @@ CREATE TABLE "NotificationOutbox" (
 CREATE INDEX "Notification_organizationId_createdAt_idx" ON "Notification"("organizationId", "createdAt");
 CREATE INDEX "Notification_recipientType_recipientId_status_idx" ON "Notification"("recipientType", "recipientId", "status");
 CREATE INDEX "Notification_type_status_idx" ON "Notification"("type", "status");
-CREATE UNIQUE INDEX "NotificationPreference_organizationId_recipientType_recipientId_type_key" ON "NotificationPreference"("organizationId", "recipientType", "recipientId", "type");
-CREATE INDEX "NotificationPreference_organizationId_recipientType_recipientId_idx" ON "NotificationPreference"("organizationId", "recipientType", "recipientId");
+CREATE UNIQUE INDEX "NotifPref_recipient_type_key" ON "NotificationPreference"("organizationId", "recipientType", "recipientId", "type");
+CREATE INDEX "NotifPref_recipient_idx" ON "NotificationPreference"("organizationId", "recipientType", "recipientId");
 CREATE INDEX "NotificationDelivery_notificationId_status_idx" ON "NotificationDelivery"("notificationId", "status");
 CREATE INDEX "NotificationDelivery_provider_providerId_idx" ON "NotificationDelivery"("provider", "providerId");
 CREATE UNIQUE INDEX "NotificationOutbox_notificationId_key" ON "NotificationOutbox"("notificationId");

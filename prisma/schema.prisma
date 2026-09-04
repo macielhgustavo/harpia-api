@@ -1447,8 +1447,8 @@ model NotificationPreference {
   createdAt DateTime @default(now())
   updatedAt DateTime @updatedAt
 
-  @@unique([organizationId, recipientType, recipientId, type])
-  @@index([organizationId, recipientType, recipientId])
+  @@unique([organizationId, recipientType, recipientId, type], map: "NotifPref_recipient_type_key")
+  @@index([organizationId, recipientType, recipientId], map: "NotifPref_recipient_idx")
 }
 
 model NotificationDelivery {
