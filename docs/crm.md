@@ -35,6 +35,7 @@ Leitura exige `CRM_READ`; mutações exigem `CRM_WRITE`.
 - `GET|PATCH|DELETE /crm/opportunities/:id`
 - `POST /crm/opportunities/:id/move`
 - `GET /crm/opportunities/:id/history`
+- `GET /crm/opportunities/:id/timeline`
 - `GET|POST /crm/activities`
 - `PATCH|DELETE /crm/activities/:id`
 

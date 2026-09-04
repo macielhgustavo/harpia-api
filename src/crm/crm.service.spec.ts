@@ -325,6 +325,50 @@ describe('CrmService', () => {
       totalPages: 3,
     });
   });
+
+  it('builds a tenant-scoped opportunity timeline in reverse chronology', async () => {
+    prisma.opportunity.findFirst.mockResolvedValue({ id: 'opportunity-1' });
+    prisma.opportunityStageHistory.findMany.mockResolvedValue([
+      {
+        id: 'history-1',
+        changedAt: new Date('2026-09-01T10:00:00.000Z'),
+        fromStage: null,
+        toStage: { name: 'Novo' },
+        changedByUser: { id: 'user-1', name: 'Ana' },
+      },
+    ]);
+    prisma.salesActivity.findMany.mockResolvedValue([
+      {
+        id: 'activity-1',
+        type: SalesActivityType.LIGACAO,
+        status: SalesActivityStatus.CONCLUIDA,
+        summary: 'Contato realizado',
+        notes: null,
+        result: 'Visita agendada',
+        createdAt: new Date('2026-09-02T10:00:00.000Z'),
+        completedAt: new Date('2026-09-02T11:00:00.000Z'),
+        assignedUser: { id: 'user-1', name: 'Ana' },
+      },
+    ]);
+    prisma.unitReservation.findMany.mockResolvedValue([]);
+    prisma.salesProposal.findMany.mockResolvedValue([]);
+    prisma.sale.findMany.mockResolvedValue([]);
+
+    const timeline = await service.findOpportunityTimeline(
+      'opportunity-1',
+      'org-a',
+    );
+
+    expect(timeline.map((item) => item.id)).toEqual([
+      'activity:activity-1',
+      'stage:history-1',
+    ]);
+    expect(prisma.unitReservation.findMany).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { opportunityId: 'opportunity-1', organizationId: 'org-a' },
+      }),
+    );
+  });
 });
 
 function createTransactionMock() {
@@ -372,5 +416,8 @@ function createPrismaMock(
     },
     opportunityStageHistory: { findMany: jest.fn() },
     salesActivity: { findMany: jest.fn(), count: jest.fn() },
+    unitReservation: { findMany: jest.fn() },
+    salesProposal: { findMany: jest.fn() },
+    sale: { findMany: jest.fn() },
   };
 }

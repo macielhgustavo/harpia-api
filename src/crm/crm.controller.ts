@@ -61,6 +61,14 @@ export class CrmController {
     return this.crm.findOpportunityHistory(id, user.organizationId);
   }
 
+  @Get('opportunities/:id/timeline')
+  findOpportunityTimeline(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.crm.findOpportunityTimeline(id, user.organizationId);
+  }
+
   @Get('opportunities/:id')
   findOpportunity(@Param('id') id: string, @CurrentUser() user: AuthUser) {
     return this.crm.findOpportunity(id, user.organizationId);

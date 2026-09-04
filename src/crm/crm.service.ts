@@ -546,6 +546,110 @@ export class CrmService {
     });
   }
 
+  async findOpportunityTimeline(id: string, organizationId: string) {
+    await this.assertOpportunityExists(id, organizationId);
+    const [stageHistory, activities, reservations, proposals, sales] =
+      await Promise.all([
+        this.prisma.opportunityStageHistory.findMany({
+          where: { opportunityId: id, organizationId },
+          include: {
+            fromStage: { select: { name: true } },
+            toStage: { select: { name: true } },
+            changedByUser: { select: { id: true, name: true } },
+          },
+        }),
+        this.prisma.salesActivity.findMany({
+          where: { opportunityId: id, organizationId },
+          include: {
+            assignedUser: { select: { id: true, name: true } },
+          },
+        }),
+        this.prisma.unitReservation.findMany({
+          where: { opportunityId: id, organizationId },
+          include: {
+            unit: { select: { identifier: true } },
+            createdByUser: { select: { id: true, name: true } },
+          },
+        }),
+        this.prisma.salesProposal.findMany({
+          where: { opportunityId: id, organizationId },
+          include: {
+            unit: { select: { identifier: true } },
+            createdByUser: { select: { id: true, name: true } },
+          },
+        }),
+        this.prisma.sale.findMany({
+          where: { opportunityId: id, organizationId },
+          include: {
+            unit: { select: { identifier: true } },
+            createdByUser: { select: { id: true, name: true } },
+          },
+        }),
+      ]);
+
+    const events = [
+      ...stageHistory.map((item) => ({
+        id: `stage:${item.id}`,
+        type: 'STAGE_CHANGED' as const,
+        occurredAt: item.changedAt,
+        title: item.fromStage
+          ? `Etapa alterada para ${item.toStage.name}`
+          : `Oportunidade criada em ${item.toStage.name}`,
+        description: item.fromStage
+          ? `Movida de ${item.fromStage.name} para ${item.toStage.name}.`
+          : 'Entrada registrada no funil comercial.',
+        status: null,
+        actor: item.changedByUser,
+      })),
+      ...activities.map((item) => ({
+        id: `activity:${item.id}`,
+        type: 'ACTIVITY' as const,
+        occurredAt: item.completedAt ?? item.createdAt,
+        title: item.summary || `Atividade ${item.type}`,
+        description: item.result || item.notes,
+        status: item.status,
+        actor: item.assignedUser,
+      })),
+      ...reservations.map((item) => ({
+        id: `reservation:${item.id}`,
+        type: 'RESERVATION' as const,
+        occurredAt: item.convertedAt ?? item.cancelledAt ?? item.createdAt,
+        title: `Reserva da unidade ${item.unit.identifier}`,
+        description: `Reserva com situação ${item.status}.`,
+        status: item.status,
+        actor: item.createdByUser,
+      })),
+      ...proposals.map((item) => ({
+        id: `proposal:${item.id}`,
+        type: 'PROPOSAL' as const,
+        occurredAt:
+          item.convertedToSaleAt ??
+          item.acceptedAt ??
+          item.rejectedAt ??
+          item.sentAt ??
+          item.createdAt,
+        title: `Proposta para a unidade ${item.unit.identifier}`,
+        description: `Proposta com situação ${item.status}.`,
+        status: item.status,
+        actor: item.createdByUser,
+      })),
+      ...sales.map((item) => ({
+        id: `sale:${item.id}`,
+        type: 'SALE' as const,
+        occurredAt: item.saleDate,
+        title: `Venda ${item.saleNumber}`,
+        description: `Unidade ${item.unit.identifier} — ${item.status}.`,
+        status: item.status,
+        actor: item.createdByUser,
+      })),
+    ];
+
+    return events.sort((a, b) => {
+      const byDate = b.occurredAt.getTime() - a.occurredAt.getTime();
+      return byDate || a.id.localeCompare(b.id);
+    });
+  }
+
   async findActivities(
     organizationId: string,
     query: ListSalesActivitiesQueryDto,
