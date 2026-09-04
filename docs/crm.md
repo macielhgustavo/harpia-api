@@ -2,6 +2,8 @@
 
 O CRM é isolado por organização em todas as tabelas e consultas. Nenhum endpoint aceita `organizationId`; o tenant e o ator vêm exclusivamente da sessão validada.
 
+Em produção, migrations pendentes são verificadas tanto no build quanto antes da inicialização do serviço, evitando que uma nova rota suba antes da respectiva estrutura de banco.
+
 ## Modelo
 
 - `SalesPipeline`: funil comercial configurável. O primeiro acesso cria, sob lock transacional, o pipeline padrão da organização.
