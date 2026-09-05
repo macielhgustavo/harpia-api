@@ -510,7 +510,7 @@ model SalesVisit {
   cancellationReason String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
-  Company            Company?           @relation(fields: [companyId], references: [id])
+  company            Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
   companyId          String?
 
   @@index([organizationId, scheduledAt])
