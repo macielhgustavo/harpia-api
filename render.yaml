@@ -2,7 +2,7 @@ services:
   - type: web
     name: harpia-api
     env: node
-    buildCommand: npm install && npx prisma migrate deploy && npx prisma generate && npm run build
+    buildCommand: npm install && npx prisma generate && npm run build
     startCommand: npm run start:prod
     envVars:
       - key: DATABASE_URL

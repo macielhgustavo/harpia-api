@@ -2,7 +2,7 @@
 
 O CRM é isolado por organização em todas as tabelas e consultas. Nenhum endpoint aceita `organizationId`; o tenant e o ator vêm exclusivamente da sessão validada.
 
-Em produção, migrations pendentes são verificadas tanto no build quanto antes da inicialização do serviço, evitando que uma nova rota suba antes da respectiva estrutura de banco.
+Em produção, migrations pendentes são aplicadas pela própria inicialização da API antes de o serviço começar a aceitar requisições. A recuperação automática é limitada à migration idempotente de visitas, caso um deploy anterior tenha deixado somente ela marcada como falha.
 
 ## Modelo
 

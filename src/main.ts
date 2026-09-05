@@ -2,8 +2,10 @@ import { NestFactory } from '@nestjs/core';
 import { ValidationPipe } from '@nestjs/common';
 import type { NestExpressApplication } from '@nestjs/platform-express';
 import { AppModule } from './app.module';
+import { runProductionMigrations } from './database/run-production-migrations';
 
 async function bootstrap() {
+  runProductionMigrations();
   const app = await NestFactory.create<NestExpressApplication>(AppModule);
 
   // Render forwards client IPs through one trusted proxy hop.
