@@ -1,418 +1,764 @@
-<p align="center">
-  <a href="http://nestjs.com/" target="blank"><img src="https://nestjs.com/img/logo-small.svg" width="120" alt="Nest Logo" /></a>
-</p>
+# Harpia API
 
-[circleci-image]: https://img.shields.io/circleci/build/github/nestjs/nest/master?token=abc123def456
-[circleci-url]: https://circleci.com/gh/nestjs/nest
+Backend do **Harpia**, uma plataforma vertical de gestão para incorporadoras imobiliárias.
 
-  <p align="center">A progressive <a href="http://nodejs.org" target="_blank">Node.js</a> framework for building efficient and scalable server-side applications.</p>
-    <p align="center">
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/v/@nestjs/core.svg" alt="NPM Version" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/l/@nestjs/core.svg" alt="Package License" /></a>
-<a href="https://www.npmjs.com/~nestjscore" target="_blank"><img src="https://img.shields.io/npm/dm/@nestjs/common.svg" alt="NPM Downloads" /></a>
-<a href="https://circleci.com/gh/nestjs/nest" target="_blank"><img src="https://img.shields.io/circleci/build/github/nestjs/nest/master" alt="CircleCI" /></a>
-<a href="https://discord.gg/G7Qnnhy" target="_blank"><img src="https://img.shields.io/badge/discord-online-brightgreen.svg" alt="Discord"/></a>
-<a href="https://opencollective.com/nest#backer" target="_blank"><img src="https://opencollective.com/nest/backers/badge.svg" alt="Backers on Open Collective" /></a>
-<a href="https://opencollective.com/nest#sponsor" target="_blank"><img src="https://opencollective.com/nest/sponsors/badge.svg" alt="Sponsors on Open Collective" /></a>
-  <a href="https://paypal.me/kamilmysliwiec" target="_blank"><img src="https://img.shields.io/badge/Donate-PayPal-ff3f59.svg" alt="Donate us"/></a>
-    <a href="https://opencollective.com/nest#sponsor"  target="_blank"><img src="https://img.shields.io/badge/Support%20us-Open%20Collective-41B883.svg" alt="Support us"></a>
-  <a href="https://twitter.com/nestframework" target="_blank"><img src="https://img.shields.io/twitter/follow/nestframework.svg?style=social&label=Follow" alt="Follow us on Twitter"></a>
-</p>
-  <!--[![Backers on Open Collective](https://opencollective.com/nest/backers/badge.svg)](https://opencollective.com/nest#backer)
-  [![Sponsors on Open Collective](https://opencollective.com/nest/sponsors/badge.svg)](https://opencollective.com/nest#sponsor)-->
+O Harpia conecta operação imobiliária, CRM, vendas, investidores, financeiro, documentos, auditoria e relatórios em um único sistema.
 
-## Description
+> Objetivo atual de produto: transformar o CRM no principal ponto de entrada comercial do Harpia, com contexto imobiliário, automações e IA assistida.
 
-[Nest](https://github.com/nestjs/nest) framework TypeScript starter repository.
+---
 
-## Project setup
+## Visão do produto
 
-```bash
-$ npm install
+O Harpia foi criado para centralizar processos que normalmente ficam espalhados entre planilhas, WhatsApp, documentos, sistemas financeiros e CRMs genéricos.
+
+Fluxo principal:
+
+```text
+Pessoa
+→ CRM
+→ Empreendimento
+→ Unidade
+→ Reserva
+→ Proposta
+→ Venda
+→ Recebíveis
+→ Financeiro
 ```
 
-## Compile and run the project
+Fluxo de investidores:
 
-```bash
-# development
-$ npm run start
-
-# watch mode
-$ npm run start:dev
-
-# production mode
-$ npm run start:prod
+```text
+Investidor
+→ Investimento
+→ Alocação
+→ Retorno
 ```
 
-## Run tests
+Estrutura imobiliária:
 
-```bash
-# unit tests
-$ npm run test
-
-# e2e tests
-$ npm run test:e2e
-
-# test coverage
-$ npm run test:cov
+```text
+Organização
+→ Empresa / SPE
+→ Empreendimento
+→ Tipologia
+→ Unidade
+→ Preço
 ```
 
-## Authentication security
+---
 
-The API uses Bearer JWTs without refresh tokens. New JWTs contain a per-user
-`tokenVersion`; the JWT strategy confirms the account, organization and current
-version in the database on every authenticated request. A password change or
-successful recovery increments that version, immediately revoking all previous
-JWTs for that account. Tokens issued by older deployments without
-`tokenVersion` are rejected and require a new login.
+## Stack
 
-New registration, password change and password recovery use one shared policy:
+### Backend
 
-- at least 10 and at most 128 characters;
-- at least one uppercase letter, lowercase letter, number and special
-  character;
-- no leading/trailing whitespace, whitespace-only value, or full e-mail value;
-- no bcrypt-truncated value (bcrypt accepts only 72 UTF-8 bytes safely).
+- NestJS
+- TypeScript
+- Prisma 5.22
+- PostgreSQL
+- Passport JWT
+- bcryptjs
+- class-validator
+- class-transformer
 
-The seed account remains available for backward compatibility:
-`admin@harpia.com` / `harpia123`. Its existing weak password can log in, but it
-cannot be used when creating, changing or recovering a password; change it
-after the first authenticated login.
+### Infraestrutura
 
-All account e-mails are trimmed and lowercased before use. Lookups are
-case-insensitive while registration serializes the normalized e-mail inside a
-PostgreSQL transaction, avoiding new case-variant duplicates. Before a future
-data-normalization migration, inspect the production database for historical
-collisions:
+- Render
+- PostgreSQL
+- storage local em desenvolvimento
+- storage privado S3-compatible em produção
 
-```sql
-SELECT lower(btrim("email")) AS normalized_email, count(*)
-FROM "User"
-GROUP BY lower(btrim("email"))
-HAVING count(*) > 1;
+### Frontend relacionado
+
+O frontend do Harpia está em outro repositório:
+
+```text
+macielhgustavo/harpia-web
 ```
 
-### Account endpoints
+Stack principal:
 
-| Endpoint | Authentication | Body | Behavior |
-| --- | --- | --- | --- |
-| `POST /auth/register` | Public | `name`, `organizationName`, `email`, `password` | Creates a normalized account using the strong policy. |
-| `POST /auth/login` | Public | `email`, `password` | Returns `401 Credenciais inválidas` for either an unknown account or wrong password. |
-| `POST /auth/forgot-password` | Public | `email` | Always returns the same success message; it does not reveal whether the account exists. |
-| `POST /auth/reset-password` | Public | `token`, `newPassword` | Uses a single-use, expiring recovery token and the strong policy. |
-| `POST /auth/accept-invitation` | Public | `token`, `name`, `password` | Atomically consumes a single-use invitation and returns a JWT. Organization, e-mail and role always come from the invitation. |
-| `POST /auth/change-password` | Bearer JWT | `currentPassword`, `newPassword` | Validates the current password, then revokes previous JWTs and outstanding reset tokens. |
+- Angular 18 standalone
+- TypeScript
+- Tailwind CSS
+- RxJS
+- Signals
+- lucide-angular
 
-Examples for the future frontend integration:
+---
 
-```bash
-curl -X POST http://localhost:3000/auth/forgot-password \
-  -H "Content-Type: application/json" \
-  -d '{"email":"admin@harpia.com"}'
+## Domínios principais
 
-curl -X POST http://localhost:3000/auth/reset-password \
-  -H "Content-Type: application/json" \
-  -d '{"token":"TOKEN_RECEBIDO","newPassword":"NovaSenha#456"}'
+O backend já possui estrutura para:
+
+### Identidade e acesso
+
+- autenticação;
+- recuperação de senha;
+- alteração de senha;
+- convites;
+- usuários;
+- RBAC;
+- revogação de sessão;
+- auditoria.
+
+### Pessoas
+
+`Person` é a entidade central de pessoas do sistema.
+
+Uma mesma pessoa pode assumir papéis como:
+
+- LEAD
+- CLIENTE
+- CORRETOR
+- FUNCIONARIO
+- FORNECEDOR
+- PARCEIRO
+- INVESTIDOR
+
+O Harpia evita criar cadastros paralelos para a mesma pessoa.
+
+### Empresas e estrutura imobiliária
+
+- empresas;
+- SPEs;
+- empreendimentos;
+- tipologias;
+- unidades;
+- tabelas de preço;
+- preço individual por unidade.
+
+### CRM
+
+- pipelines;
+- etapas;
+- oportunidades;
+- histórico de etapas;
+- atividades;
+- visitas;
+- timeline comercial;
+- filtros;
+- paginação;
+- RBAC;
+- auditoria.
+
+Pipeline padrão:
+
+```text
+Novo
+→ Contato inicial
+→ Qualificado
+→ Visita
+→ Proposta
+→ Negociação
+→ Ganho / Perdido
 ```
 
-Recovery tokens use 32 random bytes encoded as URL-safe text, but only their
-SHA-256 hash is persisted. The default TTL is 30 minutes and is configurable.
-A new recovery request invalidates any previous tokens for that account. The
-default notifier is intentionally no-op: there is no e-mail provider, no reset
-link/token is logged, and tests capture the notification through an injected
-mock only. A production notifier should be implemented behind the same
-`PASSWORD_RESET_NOTIFIER` contract.
-Expired tokens are rejected on use and old tokens are removed when a new request
-is created. A periodic cleanup job is intentionally not part of this stage.
+Uma oportunidade pode começar sem unidade específica.
 
-Authentication events are structured and sanitized: they include an event,
-user ID when applicable and a short SHA-256 e-mail fingerprint. Passwords,
-hashes, JWTs, reset tokens and reset links are never recorded.
+### Vendas
 
-### Authentication rate limits
+- reservas;
+- propostas;
+- versionamento de propostas;
+- vendas;
+- cancelamentos;
+- distratos;
+- recebíveis.
 
-Only the public authentication endpoints use `@nestjs/throttler`; operational,
-document and report endpoints are not globally throttled. Defaults are:
+### Financeiro
 
-| Route | Default |
+- núcleo financeiro;
+- contas a receber;
+- contas a pagar;
+- fluxo financeiro;
+- conciliação bancária;
+- DRE gerencial;
+- cobranças automáticas;
+- correção monetária.
+
+### Investidores
+
+- investimentos;
+- alocações;
+- retornos;
+- relatórios de posição.
+
+### Documentos
+
+- upload privado;
+- armazenamento local ou S3;
+- acesso autenticado;
+- URLs assinadas;
+- proteção por tenant.
+
+### Notificações
+
+- central de notificações;
+- preferências;
+- suporte a evolução de notificações por canais externos.
+
+### Relatórios
+
+- relatórios financeiros;
+- exportação XLSX;
+- exportação PDF;
+- filtros por período;
+- proteção contra formula injection;
+- auditoria de exportações.
+
+---
+
+# CRM
+
+O CRM é uma das principais áreas estratégicas do Harpia.
+
+Ele é isolado por organização e utiliza o usuário autenticado para definir tenant e ator.
+
+Nenhum endpoint deve confiar em `organizationId` vindo do cliente.
+
+## Modelo atual
+
+Principais entidades:
+
+- `SalesPipeline`
+- `SalesStage`
+- `Opportunity`
+- `OpportunityStageHistory`
+- `SalesActivity`
+- `SalesVisit`
+
+### Opportunity
+
+A oportunidade se conecta a:
+
+- pessoa;
+- pipeline;
+- etapa;
+- responsável;
+- empreendimento;
+- unidade opcional.
+
+### Activities
+
+Atividades podem representar:
+
+- ligação;
+- WhatsApp;
+- e-mail;
+- reunião;
+- visita;
+- follow-up;
+- tarefa;
+- outro.
+
+Possuem ciclo explícito de status e podem carregar prioridade, lembrete e resultado.
+
+### Visits
+
+`SalesVisit` representa a visita imobiliária como fluxo próprio.
+
+Pode armazenar:
+
+- oportunidade;
+- pessoa;
+- responsável;
+- empreendimento;
+- unidade;
+- agenda;
+- comparecimento;
+- resultado.
+
+## Regras importantes
+
+- criar oportunidade adiciona o papel `LEAD` de forma idempotente;
+- oportunidade não nasce em etapa terminal;
+- unidade deve pertencer ao empreendimento informado;
+- responsável deve ser usuário ativo da mesma organização;
+- mover para perdido exige motivo;
+- ganho e perda geram auditoria;
+- histórico de etapa é preservado;
+- valores comerciais novos devem usar precisão decimal adequada;
+- listagens são paginadas no servidor.
+
+## Endpoints principais
+
+```text
+GET|POST /crm/pipelines
+
+GET|POST /crm/opportunities
+GET|PATCH|DELETE /crm/opportunities/:id
+POST /crm/opportunities/:id/move
+GET /crm/opportunities/:id/history
+GET /crm/opportunities/:id/timeline
+
+GET|POST /crm/activities
+PATCH|DELETE /crm/activities/:id
+
+GET|POST /crm/visits
+PATCH /crm/visits/:id
+```
+
+Leitura exige permissão equivalente a `CRM_READ`.
+
+Mutações exigem permissão equivalente a `CRM_WRITE`.
+
+---
+
+# Direção atual do CRM
+
+A evolução do CRM está organizada em documentação própria.
+
+Prioridades:
+
+1. melhorar experiência do pipeline;
+2. consolidar timeline e produtividade;
+3. melhorar experiência de visitas;
+4. estruturar interesse imobiliário;
+5. criar matching de unidades;
+6. estruturar origens, tags e motivos de perda;
+7. criar lead score, health e próxima melhor ação;
+8. criar dashboard comercial;
+9. criar automações;
+10. adicionar IA assistida;
+11. polir mobile, performance e observabilidade.
+
+## Diferencial esperado
+
+Um CRM genérico pode dizer:
+
+> João está em negociação.
+
+O Harpia deve conseguir dizer:
+
+> João procura apartamento de 2 quartos até R$ 500 mil, visitou determinado empreendimento, recebeu proposta de uma unidade específica e está há dois dias sem interação.
+
+A especialização imobiliária é parte central da estratégia do produto.
+
+---
+
+# Documentação interna
+
+Antes de alterar o CRM, agentes e desenvolvedores devem consultar:
+
+```text
+AGENTS.md
+PROGRESS.md
+docs/crm.md
+docs/crm-master-audit.md
+docs/crm/HARPIA_CRM_MASTER.md
+docs/crm/CRM_BACKLOG.md
+docs/crm/CRM_DECISIONS.md
+docs/crm/CRM_UX.md
+```
+
+### Função dos documentos
+
+| Arquivo | Função |
 | --- | --- |
-| Login | 5 requests / 60 seconds |
-| Registration | 3 requests / 1 hour |
-| Forgot password | 3 requests / 15 minutes |
-| Reset password | 5 requests / 15 minutes |
-| Accept invitation | 5 requests / 15 minutes |
+| `AGENTS.md` | Regras de trabalho para agentes de código |
+| `PROGRESS.md` | Estado real do projeto |
+| `docs/crm.md` | Documentação técnica do CRM atual |
+| `docs/crm-master-audit.md` | Auditoria técnica histórica do CRM |
+| `HARPIA_CRM_MASTER.md` | Visão futura do CRM |
+| `CRM_BACKLOG.md` | Tarefas e fases |
+| `CRM_DECISIONS.md` | Decisões de produto e arquitetura |
+| `CRM_UX.md` | Direção de experiência do usuário |
 
-The values can be changed with the `AUTH_THROTTLE_*` variables in
-`.env.example`. The built-in storage is in-memory per instance and resets on a
-restart; use shared throttler storage before horizontally scaling the service.
-Render is configured with one trusted proxy hop so throttling uses the forwarded
-client IP rather than a shared proxy address.
+---
 
-Set these password-recovery variables in each environment:
+# Setup local
 
-```env
-PASSWORD_RESET_TOKEN_TTL_SECONDS=1800
-PASSWORD_RESET_FRONTEND_URL=https://app.example.com/reset-password
+## Pré-requisitos
+
+- Node.js
+- npm
+- PostgreSQL
+
+## Instalação
+
+```bash
+npm install
 ```
 
-User invitations use equivalent hashed-token safeguards, with a default TTL of
-seven days. Configure the future acceptance screen independently:
+Crie o arquivo de ambiente com base em:
 
-```env
-USER_INVITATION_TTL_SECONDS=604800
-USER_INVITATION_FRONTEND_URL=https://app.example.com/accept-invitation
+```text
+.env.example
 ```
 
-## Role-based access control
+Depois:
 
-Every authenticated request loads the account's current role and active state
-from the database. The role carried in the JWT is informational only; it is not
-trusted as the authorization source. Deactivating an account or changing its
-role increments `tokenVersion`, so previously issued JWTs stop working.
+```bash
+npx prisma generate
+npx prisma migrate dev
+```
 
-The centralized permission matrix currently applies these profiles:
+## Rodar em desenvolvimento
 
-| Role | Access profile |
-| --- | --- |
-| `OWNER` | Every permission, including users, audit, financial data and exports. |
-| `ADMIN` | Every permission, but cannot change an `OWNER` or grant the `OWNER` role. |
-| `FINANCEIRO` | Operational reads plus bank-account, investment and return writes, financial dashboard and report exports. |
-| `COMERCIAL` | People writes, operational reads, document/interaction writes and the reserved CRM/sales permissions. |
-| `OPERACIONAL` | Operational reads and development, unit, price, document and interaction writes. |
-| `LEITURA` | Nonfinancial read-only access. |
+```bash
+npm run start:dev
+```
 
-All existing operational controllers declare their required read permission at
-class level and override it with the matching write permission on mutations.
-Routes without authorization metadata fail closed with `403`; public routes and
-the few routes intended for any valid JWT must opt in explicitly. Current
-financial dashboard and report routes are unavailable to nonfinancial roles.
-Generic people, company, development, unit and document responses also hide indirect
-financial relationships; authorized financial callers retain the previous
-response fields.
+Outros modos:
 
-### User management endpoints
+```bash
+npm run start
+npm run start:prod
+```
 
-All endpoints below require `USERS_MANAGE` and are tenant-scoped:
+---
 
-| Endpoint | Behavior |
-| --- | --- |
-| `GET /users` | Lists safe account fields; accepts `role`, `isActive` and `search`. |
-| `GET /users/:id` | Returns one account from the active organization. |
-| `PATCH /users/:id/role` | Changes `role` and revokes existing sessions. |
-| `PATCH /users/:id/status` | Activates/deactivates an account and revokes existing sessions. |
-| `POST /users/invitations` | Creates a single pending invitation from `email` and `role`. |
-| `GET /users/invitations` | Lists tenant invitations using a projection that excludes token hashes and URLs. |
-| `POST /users/invitations/:id/revoke` | Revokes one pending invitation from the active organization. |
+# Testes
 
-An account cannot deactivate itself. The final active `OWNER` in an
-organization cannot be deactivated or demoted; mutations use a PostgreSQL
-transaction-level advisory lock per organization so concurrent requests cannot
-bypass that invariant. User responses never expose password hashes or
-`tokenVersion`.
+```bash
+npm run test
+npm run test:e2e
+npm run test:cov
+```
 
-Invitation creation and acceptance serialize the normalized e-mail with the
-same PostgreSQL advisory lock used by registration. This prevents an invited
-address from creating a separate `OWNER` tenant and ensures concurrent accepts
-have only one winner. `ADMIN` cannot create or revoke an `OWNER` invitation.
-The acceptance body never controls the tenant or role. Invalid, expired,
-revoked, already-used and concurrently consumed tokens share one generic public
-error.
+Antes de considerar um bloco concluído:
 
-Only a SHA-256 token hash is stored. The raw token exists transiently in the
-notifier payload after the invitation transaction commits. The default notifier
-is intentionally no-op and logs only sanitized IDs and an e-mail fingerprint;
-therefore production does not send invitations until a delivery provider is
-configured behind `USER_INVITATION_NOTIFIER`.
+```bash
+npx prisma format
+npx prisma generate
+npm run build
+npm test -- --runInBand --forceExit
+```
 
-## Audit logging
+Use apenas os comandos que existirem no `package.json` atual.
 
-Security and business mutations create append-only `AuditLog` records scoped
-to the authenticated organization. Database-backed mutations and their audit
-records share the same Prisma transaction, so either both commit or neither
-does. Successful logins, password changes/resets, invitations, user role and
-status changes, companies, developments, units, price tables and unit prices,
-investments, allocations, returns, private-document operations and report
-exports are covered.
+---
 
-Audit metadata is deliberately allowlisted by each caller and is passed through
-a recursive size-bounded sanitizer. Keys related to passwords, JWTs, tokens,
-hashes, secrets, authorization headers, cookies, files, binary content and
-whole requests are removed before persistence. Document names, object keys and
-contents are never stored in audit metadata.
+# Autenticação
 
-Both endpoints require the `AUDIT_READ` permission and always add the active
-organization to their database predicate:
+A API usa Bearer JWT.
 
-| Endpoint | Query parameters | Behavior |
+Novos JWTs possuem `tokenVersion`.
+
+A estratégia de autenticação valida no banco:
+
+- conta;
+- organização;
+- status;
+- versão atual do token.
+
+Alteração ou recuperação de senha incrementa `tokenVersion` e invalida JWTs anteriores.
+
+Tokens antigos sem `tokenVersion` são rejeitados.
+
+## Política de senha
+
+Novas senhas devem respeitar a política configurada pelo backend, incluindo:
+
+- comprimento mínimo;
+- maiúscula;
+- minúscula;
+- número;
+- caractere especial;
+- validação contra valores inseguros.
+
+## Conta seed
+
+O ambiente de desenvolvimento pode possuir a conta seed legada:
+
+```text
+admin@harpia.com
+```
+
+A senha correspondente deve ser tratada apenas como credencial de desenvolvimento e alterada quando necessário.
+
+Nunca utilizar credenciais seed em produção.
+
+---
+
+# Endpoints de autenticação
+
+| Endpoint | Autenticação | Função |
 | --- | --- | --- |
-| `GET /audit-logs` | `action`, `entityType`, `entityId`, `actorUserId`, `startDate`, `endDate`, `page`, `pageSize` | Returns newest-first results plus pagination metadata. The default page size is 20 and the maximum is 100. |
-| `GET /audit-logs/:id` | none | Returns one record from the active organization or a tenant-safe 404. |
+| `POST /auth/register` | Público | Cadastro |
+| `POST /auth/login` | Público | Login |
+| `POST /auth/forgot-password` | Público | Solicita recuperação |
+| `POST /auth/reset-password` | Público | Redefine senha |
+| `POST /auth/accept-invitation` | Público | Aceita convite |
+| `POST /auth/change-password` | JWT | Altera senha |
 
-There are intentionally no HTTP endpoints to update or delete audit records.
+Tokens de recuperação e convite são armazenados como hash.
 
-The action and entity names for sales, sale cancellations and financial
-transactions are reserved now, but those events are intentionally wired only
-when their corresponding domain models are introduced in roadmap phases 24,
-26 and 27. The current schema has no `Sale`, `SaleCancellation` or
-`FinancialTransaction` records to audit yet.
+---
 
-## Private document storage
+# Rate limiting
 
-Documents are never served from a public static directory. Every document route
-is protected by the application's JWT guard and download requests are scoped to
-the authenticated user's organization.
+Endpoints públicos de autenticação possuem throttling próprio.
 
-For local development, keep the default configuration:
+Os valores são configuráveis por variáveis `AUTH_THROTTLE_*`.
+
+Antes de escalar horizontalmente, o armazenamento em memória do throttler deve ser substituído por armazenamento compartilhado.
+
+---
+
+# RBAC
+
+O papel do JWT não é a fonte de autorização.
+
+O backend consulta o estado atual do usuário.
+
+Perfis principais:
+
+| Papel | Perfil |
+| --- | --- |
+| `OWNER` | acesso total |
+| `ADMIN` | acesso administrativo, com restrições sobre OWNER |
+| `FINANCEIRO` | financeiro e relatórios |
+| `COMERCIAL` | CRM, pessoas e vendas |
+| `OPERACIONAL` | empreendimentos, unidades e operação |
+| `LEITURA` | leitura não financeira |
+
+Rotas sem metadata de autorização devem falhar fechadas.
+
+---
+
+# Gestão de usuários
+
+Endpoints administrativos:
+
+```text
+GET /users
+GET /users/:id
+PATCH /users/:id/role
+PATCH /users/:id/status
+POST /users/invitations
+GET /users/invitations
+POST /users/invitations/:id/revoke
+```
+
+Regras importantes:
+
+- usuário não pode desativar a própria conta;
+- último OWNER ativo não pode ser removido/demovido;
+- ADMIN não pode gerenciar OWNER como se tivesse a mesma autoridade;
+- respostas nunca expõem hash de senha ou `tokenVersion`.
+
+---
+
+# Auditoria
+
+`AuditLog` é append-only e tenant-scoped.
+
+Mutações relevantes e auditoria devem compartilhar a mesma transação sempre que possível.
+
+Exemplos auditados:
+
+- autenticação;
+- usuários;
+- convites;
+- empresas;
+- empreendimentos;
+- unidades;
+- preços;
+- investimentos;
+- retornos;
+- documentos;
+- CRM;
+- vendas;
+- financeiro;
+- exportações.
+
+Endpoints:
+
+```text
+GET /audit-logs
+GET /audit-logs/:id
+```
+
+Não existem endpoints HTTP para alterar ou excluir registros de auditoria.
+
+---
+
+# Documentos privados
+
+Documentos nunca devem ser expostos em diretório público.
+
+## Desenvolvimento
 
 ```env
 STORAGE_DRIVER=local
 STORAGE_LOCAL_PATH=./uploads
 ```
 
-The local driver stores opaque keys below `STORAGE_LOCAL_PATH` and streams a
-file only through `GET /documents/:id/download`. The file's original name is
-preserved in the download response, while document list/detail responses expose
-the authenticated `downloadUrl` endpoint rather than a public object URL.
+## Produção
 
-For production, configure an S3-compatible private bucket:
+Exemplo:
 
 ```env
 STORAGE_DRIVER=s3
-S3_ENDPOINT=https://your-s3-compatible-endpoint # optional for AWS S3
-S3_REGION=us-east-1
-S3_BUCKET=harpia-private-documents
-S3_ACCESS_KEY_ID=...
-S3_SECRET_ACCESS_KEY=...
+S3_ENDPOINT=
+S3_REGION=
+S3_BUCKET=
+S3_ACCESS_KEY_ID=
+S3_SECRET_ACCESS_KEY=
 S3_FORCE_PATH_STYLE=false
 SIGNED_URL_EXPIRATION_SECONDS=300
 ```
 
-The S3 driver creates a short-lived signed download URL only after the JWT and
-organization checks pass. Keep the bucket private: disable public access and
-grant the application's credential `s3:GetObject`, `s3:PutObject` and
-`s3:DeleteObject` only for the `documents/*` prefix. Also grant
-`s3:ListBucket` on the bucket restricted to that prefix so the API can safely
-distinguish a missing object (404) from an authorization failure. Do not add a
-public bucket policy or expose storage credentials to clients.
+O bucket deve permanecer privado.
 
-The storage provider is recorded per document. The migration marks existing
-records as `local`, so an application can still resolve them through the local
-driver while new uploads use the configured driver. Before switching an
-existing production deployment to S3, copy any retained local files to the
-private bucket and update their provider metadata; files already lost from
-Render's ephemeral disk cannot be recovered.
+---
 
-## Financial reports
+# Reservas de unidades
 
-All report endpoints require a JWT and always scope data to the authenticated
-user's organization. They generate the requested file in memory; reports are
-never persisted to document storage.
+Usuários com permissão de leitura de vendas podem consultar reservas.
 
-| Endpoint                          | Filters                                                                   | Description                                   |
-| --------------------------------- | ------------------------------------------------------------------------- | --------------------------------------------- |
-| `GET /reports/captations`         | `startDate`, `endDate`, `developmentId`, `investorId`, `format`           | Captation by investment period                |
-| `GET /reports/returns`            | `startDate`, `endDate`, `developmentId`, `investorId`, `status`, `format` | Expected and realized returns                 |
-| `GET /reports/overdue-returns`    | `asOfDate`, `developmentId`, `investorId`, `format`                       | Pending returns overdue on the reference date |
-| `GET /reports/investor-positions` | `developmentId`, `investorId`, `format`                                   | Consolidated position by investor             |
+Usuários com permissão de escrita podem:
 
-`format` is required and accepts only `xlsx` or `pdf`. Date filters use the
-strict calendar format `YYYY-MM-DD`; when a period is supplied, `startDate` and
-`endDate` must be sent together and are inclusive, implemented internally as
-an end-exclusive UTC boundary. A requested period is limited to 366 days and
-reports are limited to 5,000 base records. `asOfDate` is optional and defaults
-to the current UTC date. Captation periods use the investment date, while
-return periods use the expected-return date. Refine the filters when the API
-returns a limit error.
+- reservar;
+- cancelar;
+- converter.
 
-When `developmentId` filters captation or investor-position reports, monetary
-metrics represent only allocations linked to that development. This prevents a
-single investment from being counted repeatedly when it is split between
-developments. The unfiltered reports distinguish allocated capital, explicit
-general-cash allocations, and capital that is not yet allocated.
-
-The database currently uses `Float` for money. Report calculations normalize
-each stored value once to integer cents, add those cents, and convert back only
-for the final report output. Excel values remain numeric and use Brazilian
-currency formatting. Text cells are protected against spreadsheet formula
-injection.
-
-Every download uses `Content-Disposition: attachment` and `Cache-Control:
-no-store`. The PDF includes Harpia metadata, filters, a paginated table, and a
-summary; Excel includes a title, filters, frozen header, automatic filters and
-summary rows.
-
-Examples:
+Endpoints:
 
 ```text
-GET /reports/captations?startDate=2026-01-01&endDate=2026-12-31&format=xlsx
-GET /reports/returns?status=ATRASADO&format=pdf
-GET /reports/investor-positions?format=xlsx
+GET /reservations
+GET /reservations/:id
+POST /reservations
+POST /reservations/:id/cancel
+POST /reservations/:id/convert
 ```
 
-## Commercial unit reservations
+Regras:
 
-Authenticated users with `SALES_READ` can list and inspect reservations. Users
-with `SALES_WRITE` can reserve an available unit, cancel an active reservation
-or convert it into the next commercial workflow:
+- apenas unidade `DISPONIVEL` pode ser reservada;
+- reserva ativa altera unidade para `RESERVADA`;
+- cancelamento pode devolver a unidade para `DISPONIVEL`;
+- concorrência é protegida por constraints, locks e transação;
+- histórico de reserva impede exclusão inconsistente.
 
-| Method | Route | Purpose |
-| --- | --- | --- |
-| `GET` | `/reservations` | Paginated list; filters: `unitId`, `personId`, `opportunityId`, `developmentId`, `status`. |
-| `GET` | `/reservations/:id` | Tenant-scoped reservation detail. |
-| `POST` | `/reservations` | Creates an active reservation and atomically changes the unit to `RESERVADA`. |
-| `POST` | `/reservations/:id/cancel` | Cancels an active reservation and releases the unit to `DISPONIVEL`. |
-| `POST` | `/reservations/:id/convert` | Marks the reservation `CONVERTIDA`; the unit remains reserved for the proposal/sale handoff. |
+---
 
-Only `DISPONIVEL` units can be reserved. A partial unique index guarantees at
-most one `ATIVA` reservation per unit, while tenant-scoped row locks and a
-transaction protect the reservation/unit state under concurrent requests.
-Expiration is normalized whenever reservations are read or mutated: an expired
-active reservation becomes `EXPIRADA`, its unit returns to `DISPONIVEL`, and
-both changes are audited. This runtime normalization is intentional for the
-current single-instance stage; a durable scheduled worker should call the same
-transition when the application is horizontally scaled or expiration must be
-processed without traffic.
+# Relatórios financeiros
 
-Reservation history blocks deletion of its unit, client or development. The
-generic unit CRUD cannot assign or clear `RESERVADA`; only reservation workflows
-own that transition.
+Relatórios são tenant-scoped e gerados em memória.
 
-## Deployment
+Formatos:
 
-When you're ready to deploy your NestJS application to production, there are some key steps you can take to ensure it runs as efficiently as possible. Check out the [deployment documentation](https://docs.nestjs.com/deployment) for more information.
+- XLSX
+- PDF
 
-If you are looking for a cloud-based platform to deploy your NestJS application, check out [Mau](https://mau.nestjs.com), our official platform for deploying NestJS applications on AWS. Mau makes deployment straightforward and fast, requiring just a few simple steps:
+Exemplos:
 
-```bash
-$ npm install -g @nestjs/mau
-$ mau deploy
+```text
+GET /reports/captations
+GET /reports/returns
+GET /reports/overdue-returns
+GET /reports/investor-positions
 ```
 
-With Mau, you can deploy your application in just a few clicks, allowing you to focus on building features rather than managing infrastructure.
+Filtros devem usar períodos válidos e respeitar limites definidos no backend.
 
-## Resources
+---
 
-Check out a few resources that may come in handy when working with NestJS:
+# Princípios de segurança
 
-- Visit the [NestJS Documentation](https://docs.nestjs.com) to learn more about the framework.
-- For questions and support, please visit our [Discord channel](https://discord.gg/G7Qnnhy).
-- To dive deeper and get more hands-on experience, check out our official video [courses](https://courses.nestjs.com/).
-- Deploy your application to AWS with the help of [NestJS Mau](https://mau.nestjs.com) in just a few clicks.
-- Visualize your application graph and interact with the NestJS application in real-time using [NestJS Devtools](https://devtools.nestjs.com).
-- Need help with your project (part-time to full-time)? Check out our official [enterprise support](https://enterprise.nestjs.com).
-- To stay in the loop and get updates, follow us on [X](https://x.com/nestframework) and [LinkedIn](https://linkedin.com/company/nestjs).
-- Looking for a job, or have a job to offer? Check out our official [Jobs board](https://jobs.nestjs.com).
+O Harpia deve manter como regras permanentes:
 
-## Support
+- tenant derivado da sessão;
+- backend como autoridade de RBAC;
+- validação de relacionamento entre entidades;
+- transações em fluxos críticos;
+- histórico imutável quando necessário;
+- proteção contra double submit;
+- proteção contra concorrência;
+- logs sanitizados;
+- documentos privados;
+- hashes para tokens sensíveis;
+- ausência de segredos no repositório;
+- cuidado com formula injection em planilhas;
+- precisão monetária adequada.
 
-Nest is an MIT-licensed open source project. It can grow thanks to the sponsors and support by the amazing backers. If you'd like to join them, please [read more here](https://docs.nestjs.com/support).
+---
 
-## Stay in touch
+# Workflow de desenvolvimento
 
-- Author - [Kamil Myśliwiec](https://twitter.com/kammysliwiec)
-- Website - [https://nestjs.com](https://nestjs.com/)
-- Twitter - [@nestframework](https://twitter.com/nestframework)
+Antes de trabalhar em uma feature:
 
-## License
+```text
+ler documentação
+→ inspecionar código atual
+→ verificar se já existe
+→ implementar
+→ testar
+→ revisar segurança
+→ revisar UX
+→ atualizar documentação
+→ atualizar PROGRESS.md
+→ commit
+→ push
+→ validar produção
+```
 
-Nest is [MIT licensed](https://github.com/nestjs/nest/blob/master/LICENSE).
+Não marcar funcionalidade como concluída se:
+
+- existe apenas no backend;
+- existe apenas no frontend;
+- não foi testada;
+- migration não foi aplicada;
+- produção está quebrada.
+
+---
+
+# Deploy
+
+Produção atual:
+
+- API: Render
+- Frontend: Vercel
+
+Migrations de produção devem ser tratadas de forma segura e idempotente.
+
+Evitar alterações destrutivas sem plano de compatibilidade.
+
+---
+
+# Roadmap atual
+
+O foco atual está no CRM.
+
+Sequência recomendada:
+
+```text
+auditoria atualizada
+→ CRM UX
+→ timeline e produtividade
+→ visitas
+→ inteligência imobiliária
+→ matching
+→ scoring
+→ dashboard
+→ automações
+→ IA assistida
+→ polimento
+```
+
+A prioridade é melhorar profundamente o fluxo comercial antes de abrir novas grandes frentes do produto.
+
+---
+
+# Repositórios
+
+Backend:
+
+```text
+macielhgustavo/harpia-api
+```
+
+Frontend:
+
+```text
+macielhgustavo/harpia-web
+```
+
+---
+
+# Licença
+
+Verifique o arquivo `LICENSE` do repositório para a licença atualmente adotada pelo projeto.
