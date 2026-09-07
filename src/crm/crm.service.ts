@@ -9,6 +9,7 @@ import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
 import { applyOpportunityStageChange } from './opportunity-stage';
+import { buildSalesActivityWhere } from './sales-activity-filters';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import {
@@ -639,37 +640,7 @@ export class CrmService {
   ) {
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const where: Prisma.SalesActivityWhereInput = {
-      organizationId,
-      ...(query.opportunityId ? { opportunityId: query.opportunityId } : {}),
-      ...(query.personId ? { personId: query.personId } : {}),
-      ...(query.assignedUserId ? { assignedUserId: query.assignedUserId } : {}),
-      ...(query.type ? { type: query.type } : {}),
-      ...(query.status ? { status: query.status } : {}),
-      ...(query.priority ? { priority: query.priority } : {}),
-      ...(query.openOnly
-        ? {
-            status: {
-              in: [
-                SalesActivityStatus.PENDENTE,
-                SalesActivityStatus.EM_ANDAMENTO,
-              ],
-            },
-          }
-        : {}),
-      ...(query.scheduledFrom || query.scheduledTo
-        ? {
-            scheduledAt: {
-              ...(query.scheduledFrom
-                ? { gte: new Date(query.scheduledFrom) }
-                : {}),
-              ...(query.scheduledTo
-                ? { lte: new Date(query.scheduledTo) }
-                : {}),
-            },
-          }
-        : {}),
-    };
+    const where = buildSalesActivityWhere(organizationId, query);
     const [data, total] = await Promise.all([
       this.prisma.salesActivity.findMany({
         where,

@@ -146,7 +146,7 @@ A fase D (visitas), listada como pendente na auditoria anterior, foi parcialment
 - **BUG-01 (ALTA) — `stageEnteredAt` não é atualizado no ganho via proposta ou venda.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-01 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `proposals.service.ts:627` e `sales.service.ts:921` gravam o `stageId` da etapa ganha, criam `OpportunityStageHistory` e auditam, mas não tocam em `stageEnteredAt`. Apenas `crm.service.ts:490` o faz. Consequência: uma oportunidade que entrou em Negociação no dia 1 e foi convertida em venda no dia 30 aparece como "29 dias na etapa" já em Ganho, e `isStalled()` pode marcar como estagnada uma oportunidade recém-ganha. O índice `Opportunity_organizationId_stageId_stageEnteredAt_idx` fica não confiável.
 - **BUG-02 (MÉDIA) — truncamento silencioso no Kanban e na agenda.** O funil carrega 50 registros e calcula `stageTotal()` sobre eles; a agenda carrega 100 e filtra as visões no cliente; o seletor de oportunidades em `/crm/visits` carrega 100. Acima desses limites, os totais por etapa, os contadores das abas e a lista de oportunidades agendáveis ficam errados sem qualquer aviso ao usuário.
 - **BUG-03 (MÉDIA) — `/crm/tasks` não tem visão de concluídas e as abas se sobrepõem.** `openOnly: true` é fixo na consulta, então nem a aba "Todas" mostra atividades concluídas. Em `matchesView`, uma atividade agendada para hoje mais cedo satisfaz simultaneamente `TODAY` e `OVERDUE`, duplicando a contagem dos badges.
-- **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
+- **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-02 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
 - **BUG-05 (MÉDIA) — visitas desconectadas do detalhe da oportunidade.** `opportunity-detail.component.html` não possui seção de visitas; elas aparecem apenas como linhas da timeline. Não é possível agendar visita, registrar comparecimento ou ver as visitas da oportunidade a partir do detalhe.
 - **BUG-06 (MÉDIA) — `lostReason` é destruído.** `crm.service.ts:487` grava `lostReason: null` ao mover para qualquer etapa não perdida, e os metadados de `OPPORTUNITY_LOST` não guardam o texto. O motivo da perda torna-se irrecuperável após reabertura, contrariando a diretriz de preservar histórico comercial.
 - **BUG-07 (BAIXA) — `SalesVisit.companyId` é schema morto.** A coluna e a FK existem no banco (migration `20260905010000_sales_visits_company_scope`) e no schema, mas nenhum service, DTO ou include a escreve ou lê.
@@ -283,3 +283,79 @@ Onze testes novos, distribuídos em quatro arquivos. Todos validam `stageEntered
 Verificação de que os testes realmente detectam o defeito: com o carimbo removido do escritor único, **5 testes falham** em 4 suítes; com ele, todos passam.
 
 Resultado final: `nest build` sem erros e `npx jest` com **57 suítes e 270 testes**, todos passando.
+
+---
+
+# CRM-FIX-02 — Resolução do BUG-04
+
+Data: 2026-09-06
+
+## Situação
+
+**CORRIGIDO.** Nenhum dado precisou de reparo: o defeito afetava apenas o resultado de consultas, nunca o que era gravado.
+
+## Causa raiz
+
+`CrmService.findActivities` montava o `where` como um literal de objeto com spreads condicionais encadeados. `status` e `openOnly` escreviam a **mesma chave** `status`, e o spread de `openOnly` vinha depois:
+
+```ts
+...(query.status ? { status: query.status } : {}),
+...(query.priority ? { priority: query.priority } : {}),
+...(query.openOnly ? { status: { in: [PENDENTE, EM_ANDAMENTO] } } : {}),
+```
+
+Em JavaScript a última chave repetida vence, então `openOnly` apagava o `status` explícito. O comportamento dependia da **ordem textual das linhas**, não de uma decisão de domínio — mover a linha de `openOnly` para cima inverteria a precedência sem nenhum aviso do compilador. Era uma armadilha estrutural, não um descuido pontual.
+
+## Contrato definido
+
+`status` e `openOnly` são filtros **independentes, combinados com E lógico**. Pedir os dois é uma interseção de conjuntos:
+
+| Requisição | Resultado |
+| --- | --- |
+| `status=CONCLUIDA` | atividades concluídas |
+| `openOnly=true` | pendentes e em andamento |
+| `status=PENDENTE&openOnly=true` | apenas pendentes |
+| `status=EM_ANDAMENTO&openOnly=true` | apenas em andamento |
+| `status=CONCLUIDA&openOnly=true` | conjunto vazio |
+| `status=CANCELADA&openOnly=true` | conjunto vazio |
+| nenhum dos dois | qualquer status |
+
+Pedir um status fechado com `openOnly` é insatisfazível por definição e devolve página vazia com `total: 0`. Isso é preferível a ignorar um dos filtros: a resposta vazia é honesta e o cliente percebe que a combinação não faz sentido, enquanto a sobrescrita silenciosa devolvia dados que o chamador não pediu.
+
+## Solução
+
+Criado `src/crm/sales-activity-filters.ts` com duas funções e uma constante:
+
+- `OPEN_SALES_ACTIVITY_STATUSES` — fonte única da definição de "atividade aberta", hoje `PENDENTE` e `EM_ANDAMENTO`. Acrescentar um status aberto no futuro é editar apenas essa constante.
+- `buildSalesActivityStatusFilter(status, openOnly)` — resolve os dois num predicado só, por **interseção real de conjuntos** (`OPEN.filter((open) => open === status)`), não por uma cadeia de `if`. A interseção vazia vira `{ in: [] }`.
+- `buildSalesActivityWhere(organizationId, query)` — monta o `where` inteiro, com o tenant sempre vindo da sessão validada.
+
+`CrmService.findActivities` passou a delegar a construção do predicado e ficou responsável apenas por paginação e execução. A listagem e a contagem compartilham o mesmo objeto `where`, então a paginação não pode divergir do conjunto retornado — há teste cobrindo isso.
+
+O contrato HTTP não mudou: o DTO segue aceitando exatamente os mesmos parâmetros. Só a semântica da combinação antes quebrada foi corrigida.
+
+### Observação sobre `{ in: [] }`
+
+A interseção vazia é traduzida para o predicado `status IN ()` do Prisma, que não casa com nenhum registro. Os testes validam o predicado gerado; essa semântica específica do Prisma é garantida por contrato da biblioteca e **não é exercitada contra um banco real**, porque o projeto não possui infraestrutura de teste de integração — lacuna já registrada como dívida técnica na re-auditoria.
+
+## Compatibilidade com o frontend
+
+Nenhuma chamada existente envia os dois filtros ao mesmo tempo, então nenhuma tela muda de comportamento:
+
+- `/crm/tasks` (`crm-tasks.component.ts:87`) envia `openOnly: true` com `assignedUserId` e `priority`, nunca `status`.
+- Detalhe da oportunidade (`opportunity-detail.component.ts:159` e `:193`) envia apenas `opportunityId` e `pageSize`.
+- `/crm` não lista atividades.
+
+Nenhum arquivo do frontend foi alterado. A aba de concluídas em `/crm/tasks` continua pendente e pertence ao CRM-FIX-03; a correção atual é o que torna essa aba implementável, porque agora é possível combinar `status` com os demais filtros sem ambiguidade.
+
+## Testes de regressão
+
+Vinte testes novos, todos validando o predicado gerado ou o resultado retornado, nunca apenas que a função foi chamada.
+
+`src/crm/sales-activity-filters.spec.ts` (novo, 18 casos): a constante de status abertos; `status` isolado; `openOnly` isolado; interseção com `PENDENTE` e com `EM_ANDAMENTO`; interseção vazia com `CONCLUIDA` e com `CANCELADA`; ausência dos dois; `openOnly=false`; tenant aplicado por padrão; tentativa de injetar `organizationId` pela query, que é ignorada; faixa de datas completa e aberta combinada com o status; prioridade combinada; e preservação de todos os demais filtros.
+
+`src/crm/crm.service.spec.ts` (2 casos): a composição chega ao Prisma com `where` idêntico em `findMany` e `count`, com `skip`/`take` corretos; e a agenda de abertas continua funcionando com `openOnly` sozinho.
+
+Verificação de que os testes detectam o defeito: reintroduzindo a semântica antiga de sobrescrita no construtor, **8 testes falham** em 2 suítes; com a correção, todos passam.
+
+Resultado final: `nest build` sem erros e `npx jest` com **58 suítes e 290 testes**, todos passando.

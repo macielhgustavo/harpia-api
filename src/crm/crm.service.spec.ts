@@ -358,6 +358,57 @@ describe('CrmService', () => {
     });
   });
 
+  it('composes status and openOnly into the activity query without overriding either', async () => {
+    prisma.salesActivity.findMany.mockResolvedValue([]);
+    prisma.salesActivity.count.mockResolvedValue(0);
+
+    const result = await service.findActivities('org-a', {
+      status: SalesActivityStatus.CONCLUIDA,
+      openOnly: true,
+      page: 1,
+      pageSize: 20,
+    });
+
+    const listCalls = prisma.salesActivity.findMany.mock.calls as unknown[][];
+    const countCalls = prisma.salesActivity.count.mock.calls as unknown[][];
+    const listInput = listCalls[0][0] as {
+      where: Record<string, unknown>;
+      skip: number;
+      take: number;
+    };
+    const countInput = countCalls[0][0] as { where: Record<string, unknown> };
+    expect(listInput.where).toEqual({
+      organizationId: 'org-a',
+      status: { in: [] },
+    });
+    // The count must share the very same predicate or pagination would lie.
+    expect(countInput.where).toEqual(listInput.where);
+    expect(listInput.skip).toBe(0);
+    expect(listInput.take).toBe(20);
+    expect(result.data).toEqual([]);
+    expect(result.pagination.total).toBe(0);
+  });
+
+  it('keeps the open activity agenda working when only openOnly is sent', async () => {
+    prisma.salesActivity.findMany.mockResolvedValue([{ id: 'activity-1' }]);
+    prisma.salesActivity.count.mockResolvedValue(1);
+
+    await service.findActivities('org-a', {
+      openOnly: true,
+      assignedUserId: 'user-1',
+    });
+
+    const listCalls = prisma.salesActivity.findMany.mock.calls as unknown[][];
+    const listInput = listCalls[0][0] as { where: Record<string, unknown> };
+    expect(listInput.where).toEqual({
+      organizationId: 'org-a',
+      assignedUserId: 'user-1',
+      status: {
+        in: [SalesActivityStatus.PENDENTE, SalesActivityStatus.EM_ANDAMENTO],
+      },
+    });
+  });
+
   it('builds a tenant-scoped opportunity timeline in reverse chronology', async () => {
     prisma.opportunity.findFirst.mockResolvedValue({ id: 'opportunity-1' });
     prisma.opportunityStageHistory.findMany.mockResolvedValue([

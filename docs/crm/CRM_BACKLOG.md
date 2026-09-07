@@ -162,7 +162,10 @@ Resolvido em 2026-09-06 centralizando a transição de etapa em `applyOpportunit
 
 **Ressalva:** oportunidades ganhas entre 2026-09-04 e 2026-09-06 podem ter o campo defasado no banco. O backfill está documentado mas **não foi executado** — depende de autorização.
 
-## CRM-FIX-02 — `openOnly` não deve sobrescrever `status` — **PENDENTE (MÉDIA)**
+## CRM-FIX-02 — `openOnly` não deve sobrescrever `status` — **CONCLUÍDO**
+Resolvido em 2026-09-06. `status` e `openOnly` passaram a ser filtros independentes combinados com E lógico, resolvidos por interseção de conjuntos em `buildSalesActivityStatusFilter` (`src/crm/sales-activity-filters.ts`); o predicado inteiro da listagem é montado por `buildSalesActivityWhere`, num só lugar e sem depender de ordem de spread. `status=CONCLUIDA&openOnly=true` agora devolve conjunto vazio. Vinte testes validam o predicado gerado. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
+
+Nenhuma tela precisou mudar: nenhuma chamada do frontend envia os dois filtros juntos. A aba de concluídas em `/crm/tasks` continua pendente no CRM-FIX-03, que esta correção destrava.
 ## CRM-FIX-03 — Visão de concluídas e abas não sobrepostas em `/crm/tasks` — **PENDENTE (MÉDIA)**
 ## CRM-FIX-04 — Eliminar truncamento silencioso no funil e na agenda — **PENDENTE (MÉDIA)**
 ## CRM-FIX-05 — Seção de visitas no detalhe da oportunidade — **PENDENTE (MÉDIA)**

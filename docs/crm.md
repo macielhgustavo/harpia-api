@@ -37,7 +37,7 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 - O chamador continua responsável por abrir a transação, aplicar o lock `FOR UPDATE` tenant-scoped na oportunidade e persistir os eventos retornados.
 - Quando a probabilidade não é informada na criação, ela herda a probabilidade padrão da etapa inicial. A movimentação de etapa **não** recalcula a probabilidade.
 - Atividades possuem ciclo explícito e prioridade. Ao concluir sem informar horário, o backend registra a conclusão; estados não concluídos não mantêm `completedAt`.
-- A listagem de atividades aceita filtros por oportunidade, pessoa, responsável, tipo, status, prioridade, intervalo de agendamento e `openOnly`, sempre no tenant da sessão.
+- A listagem de atividades aceita filtros por oportunidade, pessoa, responsável, tipo, status, prioridade, intervalo de agendamento e `openOnly`, sempre no tenant da sessão. O predicado é montado num único lugar, `buildSalesActivityWhere` (`src/crm/sales-activity-filters.ts`), de modo que nenhum filtro dependa da ordem de spread nem sobrescreva outro.
 - Visitas começam agendadas; realização, ausência ou cancelamento preservam o marco temporal enquanto o status permanecer naquela classe. Cancelamento exige motivo e `outcome` estruturado só pode ser informado para visita realizada.
 - `estimatedValue` é recebido como string decimal canônica e armazenado como `Decimal(18,2)`. A API nunca usa ponto flutuante para dinheiro comercial novo.
 - O histórico de etapa atende à operação comercial. O `AuditLog` append-only registra autoria e mutações para rastreabilidade.
@@ -47,7 +47,6 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 Estes pontos são reais e verificados no código. Não devem ser descritos como resolvidos até que exista correção.
 
 - **Oportunidades ganhas entre 2026-09-04 e 2026-09-06 podem ter `stageEnteredAt` defasado.** O defeito que permitia isso foi corrigido (ver CRM-FIX-01), mas os registros já gravados no período só são reparados por um backfill autorizado. O procedimento está documentado em `docs/crm-master-audit.md`.
-- **`openOnly` sobrescreve `status`.** Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; enviar os dois juntos ignora o `status` explícito.
 - **Timeline e histórico não são paginados.** `findOpportunityTimeline` executa seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
 - **`lostReason` é apagado ao sair da etapa perdida** e não é replicado nos metadados de auditoria, tornando o motivo irrecuperável.
 - **`SalesVisit.companyId` existe no schema e no banco mas não é usado** por nenhum service, DTO ou include. Foi introduzido pela migration `20260905010000_sales_visits_company_scope` para reconciliar drift do Prisma.
@@ -76,6 +75,28 @@ As listagens de oportunidades, atividades e visitas são paginadas no servidor, 
 
 - Oportunidades: `stageId`, `pipelineId`, `assignedUserId`, `developmentId`, `personId`, `source`, `search`, `page`, `pageSize`.
 - Atividades: `opportunityId`, `personId`, `assignedUserId`, `type`, `status`, `priority`, `scheduledFrom`, `scheduledTo`, `openOnly`, `page`, `pageSize`.
+
+#### Contrato de `status` e `openOnly`
+
+São filtros independentes, combinados com **E** lógico. Nenhum dos dois sobrescreve o outro.
+
+- `status` fixa exatamente um status.
+- `openOnly=true` restringe às atividades **abertas**, hoje `PENDENTE` e `EM_ANDAMENTO`. A lista canônica é `OPEN_SALES_ACTIVITY_STATUSES`, fonte única da definição de "aberta"; acrescentar um status aberto no futuro é editar apenas essa constante.
+- `openOnly=false` ou ausente não impõe restrição alguma.
+
+Enviar os dois é uma interseção de conjuntos:
+
+| Requisição | Resultado |
+| --- | --- |
+| `status=CONCLUIDA` | atividades concluídas |
+| `openOnly=true` | pendentes e em andamento |
+| `status=PENDENTE&openOnly=true` | apenas pendentes |
+| `status=EM_ANDAMENTO&openOnly=true` | apenas em andamento |
+| `status=CONCLUIDA&openOnly=true` | **conjunto vazio** |
+| `status=CANCELADA&openOnly=true` | **conjunto vazio** |
+| nenhum dos dois | qualquer status |
+
+Pedir um status fechado junto de `openOnly` é insatisfazível por definição e devolve página vazia com `total: 0`, em vez de ignorar silenciosamente um dos filtros. A interseção vazia é traduzida para o predicado `status IN ()` do Prisma, que não casa com nenhum registro.
 - Visitas: `opportunityId`, `assignedUserId`, `status`, `scheduledFrom`, `scheduledTo`, `page`, `pageSize`. Não há filtro por empreendimento.
 
 ## Interface (harpia-web)
