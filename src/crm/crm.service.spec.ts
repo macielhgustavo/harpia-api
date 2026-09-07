@@ -217,6 +217,38 @@ describe('CrmService', () => {
     expect(audit.recordMany).not.toHaveBeenCalled();
   });
 
+  it('keeps the stage entry timestamp untouched when the target stage is the current one', async () => {
+    tx.$queryRaw.mockResolvedValue([
+      {
+        id: 'opportunity-1',
+        personId: 'person-1',
+        pipelineId: 'pipeline-1',
+        stageId: 'stage-current',
+        assignedUserId: null,
+        developmentId: null,
+        unitId: null,
+      },
+    ]);
+    tx.salesStage.findFirst.mockResolvedValue({
+      id: 'stage-current',
+      pipelineId: 'pipeline-1',
+      isWon: false,
+      isLost: false,
+    });
+    tx.opportunity.findUniqueOrThrow.mockResolvedValue({
+      id: 'opportunity-1',
+      stageId: 'stage-current',
+    });
+
+    await service.moveOpportunity('opportunity-1', actor, {
+      stageId: 'stage-current',
+    });
+
+    expect(tx.opportunity.update).not.toHaveBeenCalled();
+    expect(tx.opportunityStageHistory.create).not.toHaveBeenCalled();
+    expect(audit.recordMany).not.toHaveBeenCalled();
+  });
+
   it('creates a tenant-scoped activity for the opportunity person', async () => {
     tx.opportunity.findFirst.mockResolvedValue({
       id: 'opportunity-1',

@@ -32,7 +32,9 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 - A unidade precisa pertencer ao empreendimento indicado; quando apenas a unidade é informada, o empreendimento é derivado dela.
 - Responsáveis precisam ser usuários ativos da mesma organização.
 - Mover para Perdido exige motivo; Ganho e Perdido geram eventos de auditoria próprios.
-- `POST /crm/opportunities/:id/move` atualiza `stageEnteredAt`, permitindo calcular tempo na etapa sem consultas N+1 ao histórico.
+- Toda mudança de etapa passa por `applyOpportunityStageChange` (`src/crm/opportunity-stage.ts`), o escritor único de `Opportunity.stageId`. Ele grava `stageEnteredAt`, cria o registro em `OpportunityStageHistory` e devolve os eventos de auditoria, de modo que os três invariantes não podem divergir. Isso vale para a movimentação manual, para o aceite de proposta e para a conversão em venda.
+- A função é um no-op quando a oportunidade já está na etapa de destino: não grava histórico, não reemite auditoria e não recarimba `stageEnteredAt`.
+- O chamador continua responsável por abrir a transação, aplicar o lock `FOR UPDATE` tenant-scoped na oportunidade e persistir os eventos retornados.
 - Quando a probabilidade não é informada na criação, ela herda a probabilidade padrão da etapa inicial. A movimentação de etapa **não** recalcula a probabilidade.
 - Atividades possuem ciclo explícito e prioridade. Ao concluir sem informar horário, o backend registra a conclusão; estados não concluídos não mantêm `completedAt`.
 - A listagem de atividades aceita filtros por oportunidade, pessoa, responsável, tipo, status, prioridade, intervalo de agendamento e `openOnly`, sempre no tenant da sessão.
@@ -44,7 +46,7 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 
 Estes pontos são reais e verificados no código. Não devem ser descritos como resolvidos até que exista correção.
 
-- **`stageEnteredAt` não é atualizado em todos os caminhos de ganho.** Apenas `CrmService.moveOpportunity` (`src/crm/crm.service.ts:490`) grava o campo. O aceite de proposta (`src/proposals/proposals.service.ts:627`) e a conversão em venda (`src/sales/sales.service.ts:921`) movem a oportunidade para a etapa ganha sem tocar em `stageEnteredAt`, deixando o "tempo na etapa" incorreto no fluxo comercial normal.
+- **Oportunidades ganhas entre 2026-09-04 e 2026-09-06 podem ter `stageEnteredAt` defasado.** O defeito que permitia isso foi corrigido (ver CRM-FIX-01), mas os registros já gravados no período só são reparados por um backfill autorizado. O procedimento está documentado em `docs/crm-master-audit.md`.
 - **`openOnly` sobrescreve `status`.** Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; enviar os dois juntos ignora o `status` explícito.
 - **Timeline e histórico não são paginados.** `findOpportunityTimeline` executa seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
 - **`lostReason` é apagado ao sair da etapa perdida** e não é replicado nos metadados de auditoria, tornando o motivo irrecuperável.

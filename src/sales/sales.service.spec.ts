@@ -241,6 +241,61 @@ describe('SalesService', () => {
     prisma.sale.findFirst.mockResolvedValue(detailedSale());
   }
 
+  /**
+   * Same convertible proposal, but attached to an opportunity so the winning
+   * path runs. The opportunity lock is the fourth raw query of the flow.
+   */
+  function arrangeProposalLinkedToOpportunity(
+    stageId: string,
+    currentStage: { isWon: boolean; isLost: boolean },
+  ) {
+    arrangeConvertibleProposal();
+    tx.$queryRaw.mockReset();
+    tx.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          id: 'unit-1',
+          developmentId: 'development-1',
+          status: UnitStatus.RESERVADA,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'reservation-1',
+          opportunityId: 'opportunity-1',
+          personId: 'person-1',
+          unitId: 'unit-1',
+          status: UnitReservationStatus.CONVERTIDA,
+          expiresAt: new Date(Date.now() + 60_000),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'proposal-1',
+          opportunityId: 'opportunity-1',
+          reservationId: 'reservation-1',
+          personId: 'person-1',
+          unitId: 'unit-1',
+          status: SalesProposalStatus.ACEITA,
+          currentVersionId: 'version-1',
+          convertedToSaleAt: null,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'opportunity-1',
+          pipelineId: 'pipeline-1',
+          stageId,
+          personId: 'person-1',
+          developmentId: 'development-1',
+          unitId: null,
+        },
+      ]);
+    tx.salesStage.findUnique.mockResolvedValue(currentStage);
+    tx.salesStage.findFirst.mockResolvedValue({ id: 'stage-won' });
+    tx.person.findMany.mockResolvedValue([{ id: 'person-1' }]);
+  }
+
   it('converts the accepted proposal atomically and freezes its commercial terms', async () => {
     arrangeConvertibleProposal();
 
@@ -309,6 +364,83 @@ describe('SalesService', () => {
       ]),
       tx,
     );
+  });
+
+  it('stamps the stage entry timestamp when the sale wins the opportunity', async () => {
+    arrangeProposalLinkedToOpportunity('stage-negotiation', {
+      isWon: false,
+      isLost: false,
+    });
+
+    await service.convertProposal('proposal-1', actor, {
+      buyers: [{ personId: 'person-1', isPrimary: true }],
+    });
+
+    expect(tx.opportunity.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        where: { id: 'opportunity-1' },
+        data: expect.objectContaining({
+          stageId: 'stage-won',
+          stageEnteredAt: expect.any(Date),
+          unitId: 'unit-1',
+        }),
+      }),
+    );
+    expect(tx.opportunityStageHistory.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: 'org-a',
+        opportunityId: 'opportunity-1',
+        fromStageId: 'stage-negotiation',
+        toStageId: 'stage-won',
+        changedByUserId: 'user-1',
+      },
+    });
+    expect(audit.recordMany).toHaveBeenCalledWith(
+      expect.arrayContaining([
+        expect.objectContaining({
+          action: AUDIT_ACTIONS.OPPORTUNITY_STAGE_CHANGED,
+        }),
+        expect.objectContaining({ action: AUDIT_ACTIONS.OPPORTUNITY_WON }),
+      ]),
+      tx,
+    );
+  });
+
+  it('does not restamp the stage of an opportunity already won', async () => {
+    arrangeProposalLinkedToOpportunity('stage-won', {
+      isWon: true,
+      isLost: false,
+    });
+
+    await service.convertProposal('proposal-1', actor, {
+      buyers: [{ personId: 'person-1', isPrimary: true }],
+    });
+
+    expect(tx.opportunityStageHistory.create).not.toHaveBeenCalled();
+    expect(tx.opportunity.update).toHaveBeenCalledWith({
+      where: { id: 'opportunity-1' },
+      data: { unitId: 'unit-1' },
+    });
+    expect(audit.recordMany).toHaveBeenCalledWith(
+      expect.not.arrayContaining([
+        expect.objectContaining({ action: AUDIT_ACTIONS.OPPORTUNITY_WON }),
+      ]),
+      tx,
+    );
+  });
+
+  it('keeps the opportunity lock scoped to the acting tenant', async () => {
+    arrangeProposalLinkedToOpportunity('stage-negotiation', {
+      isWon: false,
+      isLost: false,
+    });
+
+    await service.convertProposal('proposal-1', actor, {
+      buyers: [{ personId: 'person-1', isPrimary: true }],
+    });
+
+    const parameters = tx.$queryRaw.mock.calls[3].slice(1) as unknown[];
+    expect(parameters).toEqual(['opportunity-1', 'org-a']);
   });
 
   it('returns the existing sale when the same conversion is retried', async () => {

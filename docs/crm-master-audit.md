@@ -143,7 +143,7 @@ A fase D (visitas), listada como pendente na auditoria anterior, foi parcialment
 
 ## Bugs e inconsistências confirmados no código
 
-- **BUG-01 (ALTA) — `stageEnteredAt` não é atualizado no ganho via proposta ou venda.** `proposals.service.ts:627` e `sales.service.ts:921` gravam o `stageId` da etapa ganha, criam `OpportunityStageHistory` e auditam, mas não tocam em `stageEnteredAt`. Apenas `crm.service.ts:490` o faz. Consequência: uma oportunidade que entrou em Negociação no dia 1 e foi convertida em venda no dia 30 aparece como "29 dias na etapa" já em Ganho, e `isStalled()` pode marcar como estagnada uma oportunidade recém-ganha. O índice `Opportunity_organizationId_stageId_stageEnteredAt_idx` fica não confiável.
+- **BUG-01 (ALTA) — `stageEnteredAt` não é atualizado no ganho via proposta ou venda.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-01 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `proposals.service.ts:627` e `sales.service.ts:921` gravam o `stageId` da etapa ganha, criam `OpportunityStageHistory` e auditam, mas não tocam em `stageEnteredAt`. Apenas `crm.service.ts:490` o faz. Consequência: uma oportunidade que entrou em Negociação no dia 1 e foi convertida em venda no dia 30 aparece como "29 dias na etapa" já em Ganho, e `isStalled()` pode marcar como estagnada uma oportunidade recém-ganha. O índice `Opportunity_organizationId_stageId_stageEnteredAt_idx` fica não confiável.
 - **BUG-02 (MÉDIA) — truncamento silencioso no Kanban e na agenda.** O funil carrega 50 registros e calcula `stageTotal()` sobre eles; a agenda carrega 100 e filtra as visões no cliente; o seletor de oportunidades em `/crm/visits` carrega 100. Acima desses limites, os totais por etapa, os contadores das abas e a lista de oportunidades agendáveis ficam errados sem qualquer aviso ao usuário.
 - **BUG-03 (MÉDIA) — `/crm/tasks` não tem visão de concluídas e as abas se sobrepõem.** `openOnly: true` é fixo na consulta, então nem a aba "Todas" mostra atividades concluídas. Em `matchesView`, uma atividade agendada para hoje mais cedo satisfaz simultaneamente `TODAY` e `OVERDUE`, duplicando a contagem dos badges.
 - **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
@@ -172,3 +172,114 @@ Nenhuma violação de tenancy, RBAC ou auditoria foi encontrada no CRM nesta rod
 2. Corrigir BUG-04 e BUG-03 (contrato de filtros de atividade e visão de concluídas).
 3. Endereçar BUG-02 com paginação por etapa ou contadores vindos do servidor.
 4. Ligar visitas ao detalhe da oportunidade (BUG-05) antes de avançar para a fase E.
+
+---
+
+# CRM-FIX-01 — Resolução do BUG-01
+
+Data: 2026-09-06
+
+## Situação
+
+**CORRIGIDO no código.** Os registros históricos gravados enquanto o defeito existia continuam pendentes de backfill autorizado (ver abaixo).
+
+## Causa raiz
+
+`Opportunity.stageId` tinha três escritores independentes, cada um reimplementando a mesma sequência de "mover etapa": `CrmService.moveOpportunity`, `ProposalsService.winOpportunity` e `SalesService.ensureOpportunityWon`. Quando a fase B1 acrescentou `stageEnteredAt`, o campo foi adicionado apenas ao primeiro deles. A duplicação era a causa; a ausência do carimbo nos outros dois era o sintoma.
+
+Vale registrar que os caminhos defeituosos **gravavam `OpportunityStageHistory` corretamente** — apenas o campo desnormalizado ficava para trás. É por isso que o histórico serve como fonte confiável de reparo.
+
+## Solução
+
+Criado `src/crm/opportunity-stage.ts`, com `applyOpportunityStageChange(tx, change)` como **escritor único** de `Opportunity.stageId`. A função concentra, numa só operação:
+
+- `UPDATE` de `stageId`, `stageEnteredAt` e `lostReason`;
+- criação do registro em `OpportunityStageHistory`;
+- construção dos eventos `OPPORTUNITY_STAGE_CHANGED` e, quando terminal, `OPPORTUNITY_WON` ou `OPPORTUNITY_LOST`.
+
+Propriedades relevantes:
+
+- Colunas extras do chamador (`additionalData`, como o `unitId` resolvido pela proposta ou pela venda) são espalhadas **antes** dos campos canônicos, então não há como sobrescrever `stageId` nem `stageEnteredAt`. Há teste cobrindo essa tentativa.
+- Chamada com a etapa de destino igual à atual é no-op: retorna lista vazia e não escreve nada, preservando a idempotência que os três fluxos já praticavam.
+- A função **não** abre transação nem adquire lock: o chamador continua responsável por isso, o que evita lock duplo e mantém o `FOR UPDATE` tenant-scoped onde já estava.
+- A auditoria é **retornada**, não gravada. Cada chamador decide se registra imediatamente (`CrmService`, via `recordMany`) ou se acumula com os próprios eventos (`ProposalsService` e `SalesService`), preservando o lote único por transação e evitando eventos duplicados.
+
+É um módulo de função pura sobre `Prisma.TransactionClient`, no mesmo padrão de `src/prisma/advisory-lock.ts`. Como não é um provider, `ProposalsService` e `SalesService` apenas importam a função: **nenhum módulo Nest novo foi acoplado e não há dependência circular** entre `CrmModule`, `ProposalsModule` e `SalesModule`.
+
+## Dados históricos potencialmente afetados
+
+### Janela de exposição
+
+`stageEnteredAt` foi criado pela migration `20260904020000_crm_stage_tracking`, que fez backfill de todas as oportunidades existentes a partir do histórico. Portanto:
+
+- oportunidades anteriores a 2026-09-04 ficaram corretas pelo backfill da migration;
+- a divergência só pôde surgir **entre 2026-09-04 e 2026-09-06**, e somente em oportunidades ganhas via aceite de proposta ou conversão em venda;
+- movimentações manuais nunca foram afetadas.
+
+A janela é curta, mas o volume real só pode ser medido no banco. Não foi executada nenhuma consulta em produção.
+
+### Como identificar os registros afetados (somente leitura)
+
+```sql
+SELECT
+  o."id",
+  o."organizationId",
+  o."stageId",
+  o."stageEnteredAt",
+  h."changedAt" AS "expectedStageEnteredAt"
+FROM "Opportunity" o
+JOIN LATERAL (
+  SELECT hh."changedAt", hh."toStageId"
+  FROM "OpportunityStageHistory" hh
+  WHERE hh."opportunityId" = o."id"
+    AND hh."organizationId" = o."organizationId"
+  ORDER BY hh."changedAt" DESC, hh."id" DESC
+  LIMIT 1
+) h ON TRUE
+WHERE h."toStageId" = o."stageId"
+  AND o."stageEnteredAt" IS DISTINCT FROM h."changedAt";
+```
+
+A condição `h."toStageId" = o."stageId"` é o que torna a consulta segura: só entram oportunidades cujo último evento de histórico corresponde à etapa atual. Se os dois discordarem, o registro tem outro problema e **não** deve ser tocado por este reparo.
+
+### Como seria o backfill
+
+```sql
+UPDATE "Opportunity" AS o
+SET "stageEnteredAt" = h."changedAt"
+FROM (
+  SELECT DISTINCT ON (hh."opportunityId")
+    hh."opportunityId", hh."organizationId", hh."changedAt", hh."toStageId"
+  FROM "OpportunityStageHistory" hh
+  ORDER BY hh."opportunityId", hh."changedAt" DESC, hh."id" DESC
+) AS h
+WHERE h."opportunityId" = o."id"
+  AND h."organizationId" = o."organizationId"
+  AND h."toStageId" = o."stageId"
+  AND o."stageEnteredAt" IS DISTINCT FROM h."changedAt";
+```
+
+É a mesma regra da migration `20260904020000`, restrita às linhas divergentes.
+
+### Riscos e cuidados
+
+- **Não é migration.** Uma migration rodaria sozinha no boot (`runProductionMigrations`), o que contraria a exigência de autorização explícita. Deve ser um script pontual, revisado e executado manualmente.
+- `Opportunity.updatedAt` é `@updatedAt` do Prisma, aplicado pelo client e não por trigger. Um `UPDATE` em SQL puro **não** altera `updatedAt` — o que é desejável, já que o funil ordena por `updatedAt desc` e o reparo não deve reordenar a fila do time comercial. Um backfill via Prisma Client teria esse efeito colateral e por isso não é recomendado.
+- A operação é idempotente: reexecutar não muda mais nada, porque a condição de divergência deixa de valer.
+- Não há alteração de etapa, de histórico, de auditoria ou de valores comerciais — apenas o campo desnormalizado é realinhado à fonte de verdade.
+- Recomenda-se rodar antes a consulta de identificação, guardar o resultado como evidência e, se desejado, aplicar por organização para um rollout gradual.
+
+**O backfill não foi executado.** Depende de autorização explícita.
+
+## Testes de regressão
+
+Onze testes novos, distribuídos em quatro arquivos. Todos validam `stageEnteredAt` diretamente, não apenas `stageId`.
+
+- `src/crm/opportunity-stage.spec.ts` (novo, 6 casos): carimbo do horário e histórico, no-op na mesma etapa, impossibilidade de `additionalData` sobrescrever os invariantes, motivo de perda apenas em etapa perdida, evento único em etapa não terminal, e propagação de tenant e metadados.
+- `src/crm/crm.service.spec.ts`: movimentação para a mesma etapa não escreve nada.
+- `src/proposals/proposals.service.spec.ts`: aceite carimba `stageEnteredAt` e grava o histórico correto; oportunidade já ganha não é recarimbada.
+- `src/sales/sales.service.spec.ts`: conversão carimba `stageEnteredAt`; oportunidade já ganha só recebe `unitId`; o lock da oportunidade permanece parametrizado por `id` e `organizationId`.
+
+Verificação de que os testes realmente detectam o defeito: com o carimbo removido do escritor único, **5 testes falham** em 4 suítes; com ele, todos passam.
+
+Resultado final: `nest build` sem erros e `npx jest` com **57 suítes e 270 testes**, todos passando.

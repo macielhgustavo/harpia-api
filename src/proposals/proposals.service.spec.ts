@@ -306,9 +306,21 @@ describe('ProposalsService', () => {
     expect(tx.opportunity.update).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { id: 'opportunity-1' },
-        data: expect.objectContaining({ stageId: 'stage-won' }),
+        data: expect.objectContaining({
+          stageId: 'stage-won',
+          stageEnteredAt: expect.any(Date),
+        }),
       }),
     );
+    expect(tx.opportunityStageHistory.create).toHaveBeenCalledWith({
+      data: {
+        organizationId: 'org-a',
+        opportunityId: 'opportunity-1',
+        fromStageId: 'stage-current',
+        toStageId: 'stage-won',
+        changedByUserId: 'user-1',
+      },
+    });
     expect(tx.salesProposal.update).toHaveBeenCalledWith(
       expect.objectContaining({
         data: expect.objectContaining({ status: SalesProposalStatus.ACEITA }),
@@ -322,6 +334,55 @@ describe('ProposalsService', () => {
       tx,
     );
     expect((tx as Record<string, unknown>)['sale']).toBeUndefined();
+  });
+
+  it('does not restamp the stage of an opportunity already won', async () => {
+    prisma.salesProposal.findFirst
+      .mockResolvedValueOnce({ unitId: 'unit-1', reservationId: null })
+      .mockResolvedValue({ id: 'proposal-1', status: 'ACEITA' });
+    tx.$queryRaw
+      .mockResolvedValueOnce([
+        {
+          id: 'unit-1',
+          developmentId: 'development-1',
+          status: UnitStatus.DISPONIVEL,
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'proposal-1',
+          opportunityId: 'opportunity-1',
+          reservationId: null,
+          personId: 'person-1',
+          unitId: 'unit-1',
+          status: SalesProposalStatus.ENVIADA,
+          currentVersionId: 'version-1',
+          validUntil: new Date(Date.now() + 60_000),
+        },
+      ])
+      .mockResolvedValueOnce([
+        {
+          id: 'opportunity-1',
+          pipelineId: 'pipeline-1',
+          stageId: 'stage-won',
+          personId: 'person-1',
+          developmentId: 'development-1',
+          unitId: 'unit-1',
+        },
+      ]);
+    tx.salesStage.findUnique.mockResolvedValue({ isWon: true, isLost: false });
+    tx.unitReservation.create.mockResolvedValue({ id: 'reservation-handoff' });
+
+    await service.accept('proposal-1', actor);
+
+    expect(tx.opportunity.update).not.toHaveBeenCalled();
+    expect(tx.opportunityStageHistory.create).not.toHaveBeenCalled();
+    expect(audit.recordMany).toHaveBeenCalledWith(
+      expect.not.arrayContaining([
+        expect.objectContaining({ action: AUDIT_ACTIONS.OPPORTUNITY_WON }),
+      ]),
+      tx,
+    );
   });
 
   it('rejects direct acceptance when the unit is no longer available', async () => {

@@ -16,6 +16,7 @@ import {
 import { randomUUID } from 'crypto';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditEntry, AuditService } from '../audit/audit.service';
+import { applyOpportunityStageChange } from '../crm/opportunity-stage';
 import { PrismaService } from '../prisma/prisma.service';
 import { ReceivablesService } from '../receivables/receivables.service';
 import { ConvertProposalToSaleDto } from './dto/convert-proposal-to-sale.dto';
@@ -918,42 +919,16 @@ export class SalesService {
         'O pipeline não possui etapa de ganho configurada',
       );
     }
-    await tx.opportunity.update({
-      where: { id: opportunity.id },
-      data: { stageId: wonStage.id, unitId: unit.id, lostReason: null },
+    // The query above already constrains the stage to the winning one.
+    const stageEntries = await applyOpportunityStageChange(tx, {
+      organizationId: actor.organizationId,
+      actorUserId: actor.id,
+      opportunity,
+      toStage: { id: wonStage.id, isWon: true, isLost: false },
+      additionalData: { unitId: unit.id },
+      auditMetadata: { proposalId: proposal.id },
     });
-    await tx.opportunityStageHistory.create({
-      data: {
-        organizationId: actor.organizationId,
-        opportunityId: opportunity.id,
-        fromStageId: opportunity.stageId,
-        toStageId: wonStage.id,
-        changedByUserId: actor.id,
-      },
-    });
-    const metadata = {
-      fromStageId: opportunity.stageId,
-      toStageId: wonStage.id,
-      proposalId: proposal.id,
-    };
-    entries.push(
-      {
-        organizationId: actor.organizationId,
-        actorUserId: actor.id,
-        action: AUDIT_ACTIONS.OPPORTUNITY_STAGE_CHANGED,
-        entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-        entityId: opportunity.id,
-        metadata,
-      },
-      {
-        organizationId: actor.organizationId,
-        actorUserId: actor.id,
-        action: AUDIT_ACTIONS.OPPORTUNITY_WON,
-        entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-        entityId: opportunity.id,
-        metadata,
-      },
-    );
+    entries.push(...stageEntries);
   }
 
   private dateRange(startDate?: string, endDate?: string) {

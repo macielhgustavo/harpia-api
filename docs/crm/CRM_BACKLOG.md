@@ -157,8 +157,10 @@ Existe motor de automação apenas para cobrança (`collections-automation.servi
 
 Itens de correção, não de funcionalidade nova. Detalhamento em `docs/crm-master-audit.md`.
 
-## CRM-FIX-01 — Propagar `stageEnteredAt` no ganho por proposta e venda — **PENDENTE (ALTA)**
-`proposals.service.ts:627` e `sales.service.ts:921` movem a oportunidade sem atualizar o marco temporal. Corrompe o "tempo na etapa" no fluxo comercial normal. Exige teste de regressão.
+## CRM-FIX-01 — Propagar `stageEnteredAt` no ganho por proposta e venda — **CONCLUÍDO**
+Resolvido em 2026-09-06 centralizando a transição de etapa em `applyOpportunityStageChange` (`src/crm/opportunity-stage.ts`), agora o escritor único de `Opportunity.stageId` para movimentação manual, aceite de proposta e conversão em venda. Onze testes de regressão validam `stageEnteredAt` diretamente. Detalhes e procedimento de backfill em `docs/crm-master-audit.md`.
+
+**Ressalva:** oportunidades ganhas entre 2026-09-04 e 2026-09-06 podem ter o campo defasado no banco. O backfill está documentado mas **não foi executado** — depende de autorização.
 
 ## CRM-FIX-02 — `openOnly` não deve sobrescrever `status` — **PENDENTE (MÉDIA)**
 ## CRM-FIX-03 — Visão de concluídas e abas não sobrepostas em `/crm/tasks` — **PENDENTE (MÉDIA)**

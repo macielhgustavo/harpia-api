@@ -6,8 +6,9 @@ import {
 } from '@nestjs/common';
 import { PersonRoleType, Prisma, SalesActivityStatus } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
-import { AuditEntry, AuditService } from '../audit/audit.service';
+import { AuditService } from '../audit/audit.service';
 import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
+import { applyOpportunityStageChange } from './opportunity-stage';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import {
@@ -482,54 +483,18 @@ export class CrmService {
           'Informe o motivo ao marcar a oportunidade como perdida',
         );
       }
-      const opportunity = await tx.opportunity.update({
+      const entries = await applyOpportunityStageChange(tx, {
+        organizationId: actor.organizationId,
+        actorUserId: actor.id,
+        opportunity: current,
+        toStage: stage,
+        lostReason: dto.lostReason,
+      });
+      await this.audit.recordMany(entries, tx);
+      return tx.opportunity.findUniqueOrThrow({
         where: { id },
-        data: {
-          stageId: stage.id,
-          lostReason: stage.isLost ? dto.lostReason!.trim() : null,
-          stageEnteredAt: new Date(),
-        },
         include: OPPORTUNITY_INCLUDE,
       });
-      await tx.opportunityStageHistory.create({
-        data: {
-          organizationId: actor.organizationId,
-          opportunityId: id,
-          fromStageId: current.stageId,
-          toStageId: stage.id,
-          changedByUserId: actor.id,
-        },
-      });
-      const entries: AuditEntry[] = [
-        {
-          organizationId: actor.organizationId,
-          actorUserId: actor.id,
-          action: AUDIT_ACTIONS.OPPORTUNITY_STAGE_CHANGED,
-          entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-          entityId: id,
-          metadata: {
-            fromStageId: current.stageId,
-            toStageId: stage.id,
-          },
-        },
-      ];
-      if (stage.isWon || stage.isLost) {
-        entries.push({
-          organizationId: actor.organizationId,
-          actorUserId: actor.id,
-          action: stage.isWon
-            ? AUDIT_ACTIONS.OPPORTUNITY_WON
-            : AUDIT_ACTIONS.OPPORTUNITY_LOST,
-          entityType: AUDIT_ENTITY_TYPES.OPPORTUNITY,
-          entityId: id,
-          metadata: {
-            fromStageId: current.stageId,
-            toStageId: stage.id,
-          },
-        });
-      }
-      await this.audit.recordMany(entries, tx);
-      return opportunity;
     });
   }
 
