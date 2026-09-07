@@ -103,7 +103,38 @@ Pedir um status fechado junto de `openOnly` é insatisfazível por definição e
 
 - `/crm`: Kanban e modo lista, busca, filtros por pipeline/etapa/responsável/empreendimento, drag and drop nativo com modal de confirmação, tempo na etapa, estados de atraso e estagnação, criação, edição e movimentação. Carrega uma página de 50 oportunidades e distribui as colunas no cliente — totais e contagens por etapa refletem apenas o que foi carregado.
 - `/crm/opportunities/:id`: resumo comercial, histórico de etapas, timeline unificada, reservas, propostas e atividades. Não possui seção de visitas nem de venda.
-- `/crm/tasks`: agenda comercial com visões Hoje, Atrasadas, Próximas e Todas, filtros por responsável e prioridade, e ações de iniciar/concluir. Consulta sempre com `openOnly`, portanto não existe visão de concluídas.
+- `/crm/tasks`: agenda comercial com as visões Hoje, Atrasadas, Próximas, Concluídas e Todas as abertas, filtros por responsável e prioridade, e ações de iniciar/concluir. Cada visão é uma consulta própria ao servidor; ver a semântica abaixo.
 - `/crm/visits`: lista paginada com filtros por status, responsável e período; agendamento, registro de comparecimento com resultado, ausência e cancelamento com motivo. Não permite reagendar nem filtrar por empreendimento.
 
 Todas as telas tratam carregamento, erro com retry e vazio, espelham `CRM_READ`/`CRM_WRITE` e são navegáveis pelo grupo "Comercial" do menu. O backend permanece a autoridade de RBAC.
+
+### Visões da agenda comercial (`/crm/tasks`)
+
+Cada aba é traduzida em uma consulta própria a `GET /crm/activities`. Não há reclassificação no cliente: a aba mostra exatamente o que o servidor devolveu para aquele filtro.
+
+| Aba | Filtros enviados |
+| --- | --- |
+| Hoje | `openOnly=true`, `scheduledFrom=início do dia local`, `scheduledTo=último milissegundo do dia local` |
+| Atrasadas | `openOnly=true`, `scheduledTo=último milissegundo antes do dia local` |
+| Próximas | `openOnly=true`, `scheduledFrom=início do dia local seguinte` |
+| Concluídas | `status=CONCLUIDA` |
+| Todas as abertas | `openOnly=true` |
+
+Hoje, Atrasadas e Próximas particionam a linha do tempo em `(-∞, hoje)`, `[hoje, amanhã)` e `[amanhã, +∞)`. Os intervalos são fechados nas duas pontas no backend (`gte`/`lte`), então os limites usam o último milissegundo para não se sobrepor — `scheduledAt` é `TIMESTAMP(3)`, de modo que não existe instante entre eles. Uma atividade aberta pertence a exatamente uma dessas três visões, e uma atividade de hoje às 09:00 vista às 15:00 continua em Hoje, nunca em Atrasadas.
+
+Regras complementares:
+
+- Concluídas não usa `openOnly`, aproveitando o contrato componível definido em CRM-FIX-02.
+- O selo visual "Atrasada" segue a mesma regra da aba Atrasadas, isto é, agendamento anterior ao dia atual. Ele nunca contradiz a aba em que a atividade aparece.
+- Atividades abertas **sem** `scheduledAt` não aparecem em Hoje, Atrasadas nem Próximas, porque o filtro de data do Prisma descarta `NULL`. Elas aparecem em "Todas as abertas", que existe justamente para isso.
+- Atividades `CANCELADA` não são listadas em nenhuma visão de `/crm/tasks` hoje. É uma lacuna conhecida, não um efeito colateral.
+- Os contadores das abas vêm do `pagination.total` da mesma consulta que produziu a lista, e não de recontagem no cliente.
+- Concluídas herda a ordenação padrão do endpoint, que ordena `completedAt` de forma ascendente. Exibir as mais recentes primeiro exigiria um parâmetro de ordenação no backend, que não existe; a limitação está registrada no backlog.
+
+#### Política de fuso horário
+
+O dia é o **dia local do navegador**, não o dia UTC.
+
+Os limites são calculados com `setHours(0, 0, 0, 0)` e `setDate(+1)` sobre a data local, e só então serializados com `toISOString()` para a API. Isso mantém duas propriedades: o usuário vê como "hoje" o mesmo dia que o relógio dele mostra, e o backend continua comparando instantes absolutos, sem precisar conhecer o fuso do cliente. Usar `setDate(+1)` em vez de somar 86.400.000 ms preserva a correção em dias de mudança de horário de verão.
+
+Esta é a política adotada para o CRM e deve ser seguida por novas telas com recorte por dia. Nenhuma biblioteca de data foi introduzida.

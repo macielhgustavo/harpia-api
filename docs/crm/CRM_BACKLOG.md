@@ -65,8 +65,8 @@ Falta: **paginação** — as seis consultas não têm limite (BUG-08).
 ## CRM-007 — Follow-up profissional — **CONCLUÍDO**
 `SalesActivity` possui título (`summary`), descrição (`notes`), responsável, data/hora, status, prioridade, `reminderAt` e `result`, com DTOs, filtros e formulário no frontend.
 
-## CRM-008 — `/crm/tasks` — **PARCIAL**
-Visões Hoje, Atrasadas, Próximas e Todas existem. **Concluídas não existe** e é impossível com a consulta atual, que envia `openOnly: true` fixo. As abas Hoje e Atrasadas se sobrepõem (BUG-03).
+## CRM-008 — `/crm/tasks` — **CONCLUÍDO**
+As visões Hoje, Atrasadas, Próximas e Concluídas existem, são mutuamente exclusivas e cada uma é uma consulta própria ao servidor. A aba "Todas as abertas" foi mantida por ser a única onde aparecem atividades abertas sem agendamento. A ordenação de Concluídas e o limite de 100 registros por visão seguem como ressalvas registradas no CRM-FIX-03.
 
 ## CRM-009 — Reminders — **PENDENTE**
 `reminderAt` é persistido e editável, mas nenhum código o lê. O CRM não consome o módulo de notificações e não existe worker de lembretes.
@@ -166,7 +166,10 @@ Resolvido em 2026-09-06 centralizando a transição de etapa em `applyOpportunit
 Resolvido em 2026-09-06. `status` e `openOnly` passaram a ser filtros independentes combinados com E lógico, resolvidos por interseção de conjuntos em `buildSalesActivityStatusFilter` (`src/crm/sales-activity-filters.ts`); o predicado inteiro da listagem é montado por `buildSalesActivityWhere`, num só lugar e sem depender de ordem de spread. `status=CONCLUIDA&openOnly=true` agora devolve conjunto vazio. Vinte testes validam o predicado gerado. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
 
 Nenhuma tela precisou mudar: nenhuma chamada do frontend envia os dois filtros juntos. A aba de concluídas em `/crm/tasks` continua pendente no CRM-FIX-03, que esta correção destrava.
-## CRM-FIX-03 — Visão de concluídas e abas não sobrepostas em `/crm/tasks` — **PENDENTE (MÉDIA)**
+## CRM-FIX-03 — Visão de concluídas e abas não sobrepostas em `/crm/tasks` — **CONCLUÍDO**
+Resolvido em 2026-09-06, apenas no frontend. Cada aba virou uma consulta própria ao servidor, aproveitando o contrato componível do CRM-FIX-02: Hoje, Atrasadas e Próximas particionam a linha do tempo em `(-∞, hoje)`, `[hoje, amanhã)` e `[amanhã, +∞)`, e Concluídas usa `status=CONCLUIDA` sem `openOnly`. Os badges vêm do `pagination.total` da mesma consulta que produziu a lista. Definida a política de fuso horário do CRM: o dia é o dia local do navegador. Primeiro teste de componente de uma tela de CRM, com 28 casos e relógio fixo. Detalhes em `docs/crm-master-audit.md`.
+
+**Ressalvas:** Concluídas herda a ordenação padrão do endpoint (`completedAt` ascendente); inverter exigiria um parâmetro de ordenação que o backend não possui. Atividades `CANCELADA` seguem sem visão própria. O limite de 100 registros por visão permanece e é escopo do CRM-FIX-04, agora sinalizado na tela por um aviso explícito de truncamento.
 ## CRM-FIX-04 — Eliminar truncamento silencioso no funil e na agenda — **PENDENTE (MÉDIA)**
 ## CRM-FIX-05 — Seção de visitas no detalhe da oportunidade — **PENDENTE (MÉDIA)**
 ## CRM-FIX-06 — Preservar motivo de perda no histórico — **PENDENTE (MÉDIA)**

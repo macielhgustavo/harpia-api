@@ -145,7 +145,7 @@ A fase D (visitas), listada como pendente na auditoria anterior, foi parcialment
 
 - **BUG-01 (ALTA) — `stageEnteredAt` não é atualizado no ganho via proposta ou venda.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-01 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `proposals.service.ts:627` e `sales.service.ts:921` gravam o `stageId` da etapa ganha, criam `OpportunityStageHistory` e auditam, mas não tocam em `stageEnteredAt`. Apenas `crm.service.ts:490` o faz. Consequência: uma oportunidade que entrou em Negociação no dia 1 e foi convertida em venda no dia 30 aparece como "29 dias na etapa" já em Ganho, e `isStalled()` pode marcar como estagnada uma oportunidade recém-ganha. O índice `Opportunity_organizationId_stageId_stageEnteredAt_idx` fica não confiável.
 - **BUG-02 (MÉDIA) — truncamento silencioso no Kanban e na agenda.** O funil carrega 50 registros e calcula `stageTotal()` sobre eles; a agenda carrega 100 e filtra as visões no cliente; o seletor de oportunidades em `/crm/visits` carrega 100. Acima desses limites, os totais por etapa, os contadores das abas e a lista de oportunidades agendáveis ficam errados sem qualquer aviso ao usuário.
-- **BUG-03 (MÉDIA) — `/crm/tasks` não tem visão de concluídas e as abas se sobrepõem.** `openOnly: true` é fixo na consulta, então nem a aba "Todas" mostra atividades concluídas. Em `matchesView`, uma atividade agendada para hoje mais cedo satisfaz simultaneamente `TODAY` e `OVERDUE`, duplicando a contagem dos badges.
+- **BUG-03 (MÉDIA) — `/crm/tasks` não tem visão de concluídas e as abas se sobrepõem.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-03 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `openOnly: true` é fixo na consulta, então nem a aba "Todas" mostra atividades concluídas. Em `matchesView`, uma atividade agendada para hoje mais cedo satisfaz simultaneamente `TODAY` e `OVERDUE`, duplicando a contagem dos badges.
 - **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-02 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
 - **BUG-05 (MÉDIA) — visitas desconectadas do detalhe da oportunidade.** `opportunity-detail.component.html` não possui seção de visitas; elas aparecem apenas como linhas da timeline. Não é possível agendar visita, registrar comparecimento ou ver as visitas da oportunidade a partir do detalhe.
 - **BUG-06 (MÉDIA) — `lostReason` é destruído.** `crm.service.ts:487` grava `lostReason: null` ao mover para qualquer etapa não perdida, e os metadados de `OPPORTUNITY_LOST` não guardam o texto. O motivo da perda torna-se irrecuperável após reabertura, contrariando a diretriz de preservar histórico comercial.
@@ -359,3 +359,67 @@ Vinte testes novos, todos validando o predicado gerado ou o resultado retornado,
 Verificação de que os testes detectam o defeito: reintroduzindo a semântica antiga de sobrescrita no construtor, **8 testes falham** em 2 suítes; com a correção, todos passam.
 
 Resultado final: `nest build` sem erros e `npx jest` com **58 suítes e 290 testes**, todos passando.
+
+---
+
+# CRM-FIX-03 — Resolução do BUG-03
+
+Data: 2026-09-06
+
+## Situação
+
+**CORRIGIDO.** Alteração exclusivamente no frontend (`harpia-web`); o backend não precisou de nenhuma mudança.
+
+## Causa raiz
+
+A agenda carregava **uma única consulta** de atividades abertas (`openOnly: true` fixo, `pageSize: 100`) e reclassificava tudo no cliente, em `matchesView`. Dois defeitos vinham daí:
+
+1. **Visão de concluídas impossível.** Como `openOnly: true` era enviado sempre, nem a aba "Todas" conseguia mostrar uma atividade `CONCLUIDA`. A aba não existia porque a consulta a proibia.
+2. **Abas sobrepostas.** `TODAY` usava fronteiras de dia (`date >= início do dia && date < início do dia seguinte`), mas `OVERDUE` usava `date < now`. As duas regras não eram do mesmo tipo: uma comparava **dia**, a outra comparava **instante**. Uma atividade de hoje às 09:00, vista às 15:00, satisfazia as duas ao mesmo tempo, aparecendo em Hoje e em Atrasadas e sendo contada duas vezes nos badges.
+
+O erro conceitual foi misturar duas unidades de comparação para particionar o mesmo conjunto.
+
+## Solução
+
+Cada aba passou a ser **uma consulta própria ao servidor**, aproveitando o contrato componível entregue por CRM-FIX-02. Não há mais reclassificação no cliente.
+
+| Aba | Filtros |
+| --- | --- |
+| Hoje | `openOnly=true`, `scheduledFrom=início do dia local`, `scheduledTo=último ms do dia local` |
+| Atrasadas | `openOnly=true`, `scheduledTo=último ms antes do dia local` |
+| Próximas | `openOnly=true`, `scheduledFrom=início do dia local seguinte` |
+| Concluídas | `status=CONCLUIDA` |
+| Todas as abertas | `openOnly=true` |
+
+As três visões de abertas particionam a linha do tempo em `(-∞, hoje)`, `[hoje, amanhã)` e `[amanhã, +∞)`. Como o backend usa intervalos fechados (`gte`/`lte`) e `scheduledAt` é `TIMESTAMP(3)`, os limites usam o último milissegundo: não há sobreposição nem lacuna. Toda comparação passou a ser de **dia**, eliminando a mistura de unidades.
+
+Decisões associadas:
+
+- **Badges vêm do `pagination.total` da mesma consulta que produziu a lista.** Não há recontagem no cliente, então contador e lista não podem divergir.
+- **Trocar de aba não dispara requisição.** As cinco visões são carregadas em paralelo por um `forkJoin`; a troca só alterna dados já carregados, o que elimina flicker. Recarregar acontece apenas em "Atualizar", ao mudar filtros e após concluir/iniciar uma atividade.
+- **Guarda de sequência** (`loadSequence`, mesmo padrão de `crm.component.ts`) descarta respostas antigas que cheguem depois de um carregamento mais novo.
+- **O selo "Atrasada" passou a usar a mesma regra da aba Atrasadas**, isto é, agendamento anterior ao dia atual. Antes ele comparava com `now` e marcava como atrasada uma atividade que estava listada em Hoje, contradizendo a própria aba.
+- **`loadError` e `actionError` foram separados.** Falha de carregamento bloqueia a lista e oferece "Tentar novamente"; falha de ação vira apenas um aviso, sem destruir a lista já carregada.
+- **A aba "Todas" foi mantida e renomeada para "Todas as abertas".** Ela é a única visão onde aparecem atividades abertas **sem** `scheduledAt`, já que o filtro de data do Prisma descarta `NULL`. O rótulo antigo prometia mais do que a consulta entregava.
+
+## Limitações registradas, não corrigidas aqui
+
+- **Concluídas herda a ordenação padrão do endpoint**, que ordena `completedAt` de forma **ascendente** — as mais antigas primeiro. Exibir as mais recentes exigiria um parâmetro de ordenação em `GET /crm/activities`, que não existe. Ordenar só a página carregada no cliente seria pior, porque ordenaria as 100 mais antigas e pareceria correto. Fica como item de backlog.
+- **Atividades `CANCELADA` não aparecem em nenhuma visão de `/crm/tasks`.** Todas as abas de abertas usam `openOnly`, e Concluídas filtra `CONCLUIDA`. É lacuna conhecida e deliberada nesta tarefa.
+- **A lista de cada visão continua limitada a 100 registros.** Isso é CRM-FIX-04. Para que o badge não passe a mentir agora que mostra o total real do servidor, a tela exibe um aviso explícito quando `total > registros exibidos`. O aviso torna o truncamento visível; eliminá-lo continua sendo o escopo do CRM-FIX-04.
+
+## Política de fuso horário
+
+O projeto não tinha política explícita. Fica definida: **o dia é o dia local do navegador**, não o dia UTC.
+
+Os limites são calculados com `setHours(0, 0, 0, 0)` e `setDate(+1)` sobre a data local e só então serializados com `toISOString()` para a API. O usuário vê como "hoje" o mesmo dia do relógio dele, e o backend continua comparando instantes absolutos sem precisar conhecer o fuso do cliente. `setDate(+1)` foi escolhido em vez de somar 86.400.000 ms porque preserva a correção em dias de mudança de horário de verão. Nenhuma biblioteca de data foi introduzida.
+
+## Testes
+
+`src/app/pages/crm/crm-tasks.component.spec.ts` é **o primeiro teste de componente de uma tela de CRM**, começando a fechar a lacuna registrada na re-auditoria. São 28 casos, com relógio fixo em 15/09/2026 15:30 local via `spyOn(Date, 'now')` — nenhum depende da data da máquina.
+
+Cobrem: os filtros exatos de cada uma das cinco abas; a exclusividade mútua verificada nos limites (último instante de ontem, início de hoje, hoje de manhã, último instante de hoje, início de amanhã), incluindo ausência de lacuna; atividade de hoje já passada permanecendo só em Hoje; ontem só em Atrasadas; amanhã só em Próximas; concluída fora das visões de abertas; lista e badge saindo da mesma consulta; troca de aba sem novas requisições; descarte de resposta obsoleta; preservação de prioridade e responsável em todas as visões; omissão de responsável vazio; empty state próprio de cada aba; loading pendente e resolvido; erro com retry; e falha de ação sem bloquear a lista.
+
+Verificação de que os testes detectam o defeito: reintroduzindo as duas causas originais (`scheduledTo=now` em Atrasadas e `openOnly` fixo em Concluídas), **4 testes falham**, exatamente nos sintomas do BUG-03.
+
+Resultado: suíte do frontend com **448 testes** passando (eram 420) e `ng build` sem erros. O backend permaneceu intocado, com 58 suítes e 290 testes passando.
