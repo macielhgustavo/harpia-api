@@ -9,7 +9,12 @@ import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { acquireTransactionAdvisoryLock } from '../prisma/advisory-lock';
 import { applyOpportunityStageChange } from './opportunity-stage';
+import {
+  OPPORTUNITY_ORDER,
+  buildOpportunityWhere,
+} from './opportunity-filters';
 import { buildSalesActivityWhere } from './sales-activity-filters';
+import { BoardQueryDto } from './dto/board-query.dto';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import {
@@ -208,38 +213,12 @@ export class CrmService {
     await this.ensureDefaultPipeline(organizationId);
     const page = query.page ?? 1;
     const pageSize = query.pageSize ?? 20;
-    const search = query.search?.trim();
-    const where: Prisma.OpportunityWhereInput = {
-      organizationId,
-      ...(query.stageId ? { stageId: query.stageId } : {}),
-      ...(query.pipelineId ? { pipelineId: query.pipelineId } : {}),
-      ...(query.assignedUserId ? { assignedUserId: query.assignedUserId } : {}),
-      ...(query.developmentId ? { developmentId: query.developmentId } : {}),
-      ...(query.personId ? { personId: query.personId } : {}),
-      ...(query.source
-        ? { source: { equals: query.source, mode: 'insensitive' } }
-        : {}),
-      ...(search
-        ? {
-            OR: [
-              { person: { name: { contains: search, mode: 'insensitive' } } },
-              { person: { email: { contains: search, mode: 'insensitive' } } },
-              { source: { contains: search, mode: 'insensitive' } },
-              { notes: { contains: search, mode: 'insensitive' } },
-              {
-                unit: {
-                  identifier: { contains: search, mode: 'insensitive' },
-                },
-              },
-            ],
-          }
-        : {}),
-    };
+    const where = buildOpportunityWhere(organizationId, query);
     const [data, total] = await Promise.all([
       this.prisma.opportunity.findMany({
         where,
         include: OPPORTUNITY_INCLUDE,
-        orderBy: [{ updatedAt: 'desc' }, { id: 'desc' }],
+        orderBy: OPPORTUNITY_ORDER,
         skip: (page - 1) * pageSize,
         take: pageSize,
       }),
@@ -252,6 +231,114 @@ export class CrmService {
         pageSize,
         total,
         totalPages: Math.ceil(total / pageSize),
+      },
+    };
+  }
+
+  /**
+   * Kanban board: every stage of a pipeline with its own page of cards and
+   * aggregates computed over the whole filtered set, not over the page.
+   *
+   * Query budget is one pipeline read, one grouped aggregate covering every
+   * stage at once, and one page per stage issued in parallel — about ten
+   * round trips for the default eight-stage pipeline. A single window-function
+   * query would save a few of those, at the cost of raw SQL that would have to
+   * reimplement the shared predicate; the aggregate is the part that grows
+   * with the data, and it is already a single query.
+   */
+  async findBoard(organizationId: string, query: BoardQueryDto) {
+    const pipeline = query.pipelineId
+      ? await this.prisma.salesPipeline.findFirst({
+          where: { id: query.pipelineId, organizationId, isActive: true },
+          include: { stages: { orderBy: { position: 'asc' } } },
+        })
+      : await this.ensureDefaultPipeline(organizationId);
+    if (!pipeline) throw new NotFoundException('Pipeline não encontrado');
+
+    const stageLimit = query.stageLimit ?? 20;
+    const where = buildOpportunityWhere(organizationId, {
+      ...query,
+      pipelineId: pipeline.id,
+    });
+
+    // Grouping by probability as well keeps the weighted sum exact without
+    // raw SQL: probability is a 0-100 integer, so the buckets stay bounded.
+    const [buckets, ...stagePages] = await Promise.all([
+      this.prisma.opportunity.groupBy({
+        by: ['stageId', 'probability'],
+        where,
+        _count: { _all: true },
+        _sum: { estimatedValue: true },
+      }),
+      ...pipeline.stages.map((stage) =>
+        stageLimit === 0
+          ? Promise.resolve([])
+          : this.prisma.opportunity.findMany({
+              where: { ...where, stageId: stage.id },
+              include: OPPORTUNITY_INCLUDE,
+              orderBy: OPPORTUNITY_ORDER,
+              take: stageLimit,
+            }),
+      ),
+    ]);
+
+    const stages = pipeline.stages.map((stage, index) => {
+      const opportunities = stagePages[index];
+      let total = 0;
+      let estimatedValue = new Prisma.Decimal(0);
+      let weightedValue = new Prisma.Decimal(0);
+      for (const bucket of buckets) {
+        if (bucket.stageId !== stage.id) continue;
+        total += bucket._count._all;
+        const sum = bucket._sum.estimatedValue ?? new Prisma.Decimal(0);
+        estimatedValue = estimatedValue.plus(sum);
+        // Mirrors the interface fallback: an opportunity without an explicit
+        // probability is weighted by the probability of its stage.
+        const probability = bucket.probability ?? stage.defaultProbability;
+        weightedValue = weightedValue.plus(
+          sum.times(probability).dividedBy(100),
+        );
+      }
+      return {
+        stage,
+        summary: {
+          total,
+          loaded: opportunities.length,
+          hasMore: total > opportunities.length,
+          estimatedValue: estimatedValue.toFixed(2),
+          weightedValue: weightedValue.toFixed(2),
+        },
+        opportunities,
+        pagination: {
+          page: 1,
+          pageSize: stageLimit,
+          total,
+          totalPages: stageLimit === 0 ? 0 : Math.ceil(total / stageLimit),
+        },
+      };
+    });
+
+    return {
+      pipeline: {
+        id: pipeline.id,
+        name: pipeline.name,
+        isDefault: pipeline.isDefault,
+      },
+      stages,
+      summary: {
+        total: stages.reduce((sum, item) => sum + item.summary.total, 0),
+        estimatedValue: stages
+          .reduce(
+            (sum, item) => sum.plus(item.summary.estimatedValue),
+            new Prisma.Decimal(0),
+          )
+          .toFixed(2),
+        weightedValue: stages
+          .reduce(
+            (sum, item) => sum.plus(item.summary.weightedValue),
+            new Prisma.Decimal(0),
+          )
+          .toFixed(2),
       },
     };
   }
@@ -649,6 +736,8 @@ export class CrmService {
           { completedAt: { sort: 'asc', nulls: 'first' } },
           { scheduledAt: { sort: 'asc', nulls: 'last' } },
           { createdAt: 'desc' },
+          // Breaks remaining ties so paging cannot skip or repeat a record.
+          { id: 'desc' },
         ],
         skip: (page - 1) * pageSize,
         take: pageSize,

@@ -12,6 +12,7 @@ import { CurrentUser } from '../auth/decorators/current-user.decorator';
 import { PERMISSIONS } from '../auth/permissions/permissions';
 import { RequirePermissions } from '../auth/permissions/require-permissions.decorator';
 import { CrmService } from './crm.service';
+import { BoardQueryDto } from './dto/board-query.dto';
 import { CreateOpportunityDto } from './dto/create-opportunity.dto';
 import { CreateSalesActivityDto } from './dto/create-sales-activity.dto';
 import { CreateSalesPipelineDto } from './dto/create-sales-pipeline.dto';
@@ -43,6 +44,11 @@ export class CrmController {
     @Body() dto: CreateSalesPipelineDto,
   ) {
     return this.crm.createPipeline(user, dto);
+  }
+
+  @Get('board')
+  findBoard(@CurrentUser() user: AuthUser, @Query() query: BoardQueryDto) {
+    return this.crm.findBoard(user.organizationId, query);
   }
 
   @Get('opportunities')

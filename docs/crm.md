@@ -59,6 +59,7 @@ Estes pontos são reais e verificados no código. Não devem ser descritos como 
 Leitura exige `CRM_READ`; mutações exigem `CRM_WRITE`. O guard é global e fail-closed.
 
 - `GET|POST /crm/pipelines`
+- `GET /crm/board`
 - `GET|POST /crm/opportunities`
 - `GET|PATCH|DELETE /crm/opportunities/:id`
 - `POST /crm/opportunities/:id/move`
@@ -74,6 +75,7 @@ As listagens de oportunidades, atividades e visitas são paginadas no servidor, 
 ### Filtros aceitos
 
 - Oportunidades: `stageId`, `pipelineId`, `assignedUserId`, `developmentId`, `personId`, `source`, `search`, `page`, `pageSize`.
+- Board: os mesmos da lista exceto `stageId`, mais `stageLimit`.
 - Atividades: `opportunityId`, `personId`, `assignedUserId`, `type`, `status`, `priority`, `scheduledFrom`, `scheduledTo`, `openOnly`, `page`, `pageSize`.
 
 #### Contrato de `status` e `openOnly`
@@ -101,10 +103,10 @@ Pedir um status fechado junto de `openOnly` é insatisfazível por definição e
 
 ## Interface (harpia-web)
 
-- `/crm`: Kanban e modo lista, busca, filtros por pipeline/etapa/responsável/empreendimento, drag and drop nativo com modal de confirmação, tempo na etapa, estados de atraso e estagnação, criação, edição e movimentação. Carrega uma página de 50 oportunidades e distribui as colunas no cliente — totais e contagens por etapa refletem apenas o que foi carregado.
+- `/crm`: Kanban e modo lista, busca, filtros por pipeline/etapa/responsável/empreendimento, drag and drop nativo com modal de confirmação, tempo na etapa, estados de atraso e estagnação, criação, edição e movimentação. O funil consome `GET /crm/board`: cada coluna tem paginação própria e os totais vêm do servidor.
 - `/crm/opportunities/:id`: resumo comercial, histórico de etapas, timeline unificada, reservas, propostas e atividades. Não possui seção de visitas nem de venda.
-- `/crm/tasks`: agenda comercial com as visões Hoje, Atrasadas, Próximas, Concluídas e Todas as abertas, filtros por responsável e prioridade, e ações de iniciar/concluir. Cada visão é uma consulta própria ao servidor; ver a semântica abaixo.
-- `/crm/visits`: lista paginada com filtros por status, responsável e período; agendamento, registro de comparecimento com resultado, ausência e cancelamento com motivo. Não permite reagendar nem filtrar por empreendimento.
+- `/crm/tasks`: agenda comercial com as visões Hoje, Atrasadas, Próximas, Concluídas e Todas as abertas, filtros por responsável e prioridade, ações de iniciar/concluir e `Carregar mais` por visão. Cada visão é uma consulta própria ao servidor; ver a semântica abaixo.
+- `/crm/visits`: lista paginada com filtros por status, responsável e período; agendamento com busca de oportunidade no servidor, registro de comparecimento com resultado, ausência e cancelamento com motivo. Não permite reagendar nem filtrar por empreendimento.
 
 Todas as telas tratam carregamento, erro com retry e vazio, espelham `CRM_READ`/`CRM_WRITE` e são navegáveis pelo grupo "Comercial" do menu. O backend permanece a autoridade de RBAC.
 
@@ -138,3 +140,67 @@ O dia é o **dia local do navegador**, não o dia UTC.
 Os limites são calculados com `setHours(0, 0, 0, 0)` e `setDate(+1)` sobre a data local, e só então serializados com `toISOString()` para a API. Isso mantém duas propriedades: o usuário vê como "hoje" o mesmo dia que o relógio dele mostra, e o backend continua comparando instantes absolutos, sem precisar conhecer o fuso do cliente. Usar `setDate(+1)` em vez de somar 86.400.000 ms preserva a correção em dias de mudança de horário de verão.
 
 Esta é a política adotada para o CRM e deve ser seguida por novas telas com recorte por dia. Nenhuma biblioteca de data foi introduzida.
+
+### Kanban: `GET /crm/board`
+
+Devolve todas as etapas de um pipeline, cada uma com **uma página própria de cards** e **agregados calculados sobre o conjunto filtrado inteiro**, não sobre a página.
+
+```json
+{
+  "pipeline": { "id": "...", "name": "...", "isDefault": true },
+  "stages": [
+    {
+      "stage": { "id": "...", "name": "Negociação", "defaultProbability": 85 },
+      "summary": {
+        "total": 87,
+        "loaded": 20,
+        "hasMore": true,
+        "estimatedValue": "14350000.00",
+        "weightedValue": "9680000.00"
+      },
+      "opportunities": [],
+      "pagination": { "page": 1, "pageSize": 20, "total": 87, "totalPages": 5 }
+    }
+  ],
+  "summary": { "total": 87, "estimatedValue": "...", "weightedValue": "..." }
+}
+```
+
+- `total` é a contagem real no tenant com os filtros aplicados; `loaded` é o tamanho da página devolvida; `hasMore` é `total > loaded`.
+- `stageLimit` controla quantos cards vêm por etapa (padrão 20, máximo 100). **`stageLimit=0` devolve apenas os agregados**, sem nenhuma linha: é assim que o funil atualiza os totais depois de mover um card, sem recarregar lista alguma.
+- Os filtros aceitos são os mesmos da listagem, exceto `stageId` — o board sempre devolve todas as etapas.
+
+#### Paginação por etapa
+
+Cada coluna pagina de forma independente. O board entrega a primeira página; as seguintes vêm de `GET /crm/opportunities?stageId=...&page=N`, o endpoint que já existia. Carregar mais em uma coluna não recarrega as outras.
+
+A ordenação de toda página de oportunidade é `updatedAt desc, id desc`. O `id` como desempate é o que garante que paginar não pule nem repita registros. A listagem de atividades ganhou o mesmo desempate.
+
+#### Agregações
+
+`total`, `estimatedValue` e `weightedValue` saem de **uma única consulta agregada** que cobre todas as etapas de uma vez, agrupada por `(stageId, probability)`. Agrupar também por probabilidade é o que permite calcular o valor ponderado sem SQL bruto: `probability` é inteiro de 0 a 100, então os buckets são poucos e limitados, e a soma ponderada é feita com `Prisma.Decimal`.
+
+`weightedValue` é `Σ (soma do bucket × probabilidade ÷ 100)`. Quando a oportunidade não tem probabilidade própria, usa-se a `defaultProbability` da etapa — o mesmo critério que a interface aplica ao exibir.
+
+**Dinheiro nunca passa por `Number`.** As somas são feitas em `Prisma.Decimal` e serializadas como string decimal canônica com duas casas. O frontend trata esses campos como string opaca e só os converte na formatação para exibição.
+
+#### Custo de consultas
+
+Uma leitura do pipeline, uma agregação cobrindo todas as etapas e uma página por etapa, disparadas em paralelo — cerca de dez round trips no pipeline padrão de oito etapas. Uma única consulta com window function economizaria algumas idas ao banco, mas exigiria SQL bruto reimplementando o predicado compartilhado; a parte que cresce com o volume de dados é a agregação, e essa já é uma consulta só.
+
+O índice `Opportunity_organizationId_stageId_updatedAt_idx` (migration `20260906010000_crm_board_stage_index`) sustenta a paginação por etapa. Os índices anteriores cobriam `createdAt` e `stageEnteredAt`, não a ordenação usada pelas páginas.
+
+#### Filtros e agregados sempre coerentes
+
+Cards, contagem e valores saem do mesmo predicado, montado por `buildOpportunityWhere` (`src/crm/opportunity-filters.ts`) e reutilizado pela listagem, pelas páginas de cada coluna e pela agregação. Não existe uma segunda implementação dos filtros.
+
+### Truncamento no frontend
+
+Nenhuma lista do CRM é apresentada como completa quando não é.
+
+- **Funil**: 20 cards por coluna, com `Carregar mais N` mostrando exatamente quantos faltam. Contagem e valores no cabeçalho da coluna vêm do servidor.
+- **Mover card**: a coluna de origem e a de destino são ajustadas localmente e os agregados são relidos com `stageLimit=0`. Se a chamada falhar, o estado anterior das colunas é restaurado.
+- **`/crm/tasks`**: 20 atividades por página, com `Carregar mais` por visão. Os badges continuam vindo de `pagination.total`.
+- **`/crm/visits`**: o seletor de oportunidade passou a ser busca no servidor com *debounce* de 300 ms, cobrindo qualquer oportunidade do tenant. A quantidade não exibida é informada.
+
+Limites que permanecem, por serem por oportunidade e não por tenant: atividades, reservas e propostas dentro do detalhe da oportunidade carregam até 100 registros cada, e a timeline segue sem paginação.

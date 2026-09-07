@@ -432,6 +432,7 @@ model Opportunity {
   @@index([organizationId, unitId])
   @@index([organizationId, nextContactAt])
   @@index([organizationId, stageId, stageEnteredAt])
+  @@index([organizationId, stageId, updatedAt])
 }
 
 model OpportunityStageHistory {

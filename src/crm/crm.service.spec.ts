@@ -492,11 +492,12 @@ function createPrismaMock(
     $transaction: jest.fn((callback: (tx: typeof transaction) => unknown) =>
       Promise.resolve(callback(transaction)),
     ),
-    salesPipeline: { findMany: jest.fn() },
+    salesPipeline: { findMany: jest.fn(), findFirst: jest.fn() },
     opportunity: {
       findMany: jest.fn(),
       count: jest.fn(),
       findFirst: jest.fn(),
+      groupBy: jest.fn(),
     },
     opportunityStageHistory: { findMany: jest.fn() },
     salesActivity: { findMany: jest.fn(), count: jest.fn() },

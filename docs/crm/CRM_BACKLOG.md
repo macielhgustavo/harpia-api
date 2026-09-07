@@ -29,7 +29,7 @@ Resultado registrado na seção "Atualização — Re-auditoria CRM-A01" de `doc
 
 # Fase B — Experiência principal
 
-## CRM-001 — Kanban premium — **PARCIAL**
+## CRM-001 — Kanban premium — **PARCIAL** *(paginação e totais resolvidos no CRM-FIX-04)*
 - cards densos e úteis — parcial (pessoa, empreendimento/unidade, valor, responsável, probabilidade, próximo contato e tempo na etapa; sem próxima atividade e sem score);
 - drag and drop robusto — feito (HTML5 nativo, `crm.component.ts:263`);
 - persistência e rollback visual — persistência feita; não há update otimista, o drop abre modal de confirmação, então não existe rollback a fazer;
@@ -170,7 +170,10 @@ Nenhuma tela precisou mudar: nenhuma chamada do frontend envia os dois filtros j
 Resolvido em 2026-09-06, apenas no frontend. Cada aba virou uma consulta própria ao servidor, aproveitando o contrato componível do CRM-FIX-02: Hoje, Atrasadas e Próximas particionam a linha do tempo em `(-∞, hoje)`, `[hoje, amanhã)` e `[amanhã, +∞)`, e Concluídas usa `status=CONCLUIDA` sem `openOnly`. Os badges vêm do `pagination.total` da mesma consulta que produziu a lista. Definida a política de fuso horário do CRM: o dia é o dia local do navegador. Primeiro teste de componente de uma tela de CRM, com 28 casos e relógio fixo. Detalhes em `docs/crm-master-audit.md`.
 
 **Ressalvas:** Concluídas herda a ordenação padrão do endpoint (`completedAt` ascendente); inverter exigiria um parâmetro de ordenação que o backend não possui. Atividades `CANCELADA` seguem sem visão própria. O limite de 100 registros por visão permanece e é escopo do CRM-FIX-04, agora sinalizado na tela por um aviso explícito de truncamento.
-## CRM-FIX-04 — Eliminar truncamento silencioso no funil e na agenda — **PENDENTE (MÉDIA)**
+## CRM-FIX-04 — Eliminar truncamento silencioso no funil e na agenda — **CONCLUÍDO**
+Resolvido em 2026-09-06 nos dois repositórios. Criado `GET /crm/board`, que devolve cada etapa com página própria e agregados (`total`, `loaded`, `hasMore`, `estimatedValue`, `weightedValue`) calculados sobre o conjunto filtrado inteiro. A agregação é uma única consulta agrupada por `(stageId, probability)`, o que permite o valor ponderado sem SQL bruto e mantém uma só implementação dos filtros, em `buildOpportunityWhere`. Dinheiro é somado em `Prisma.Decimal` e serializado como string. O funil carrega 20 cards por etapa com `Carregar mais`; a agenda pagina por visão; o seletor de oportunidade em `/crm/visits` virou busca no servidor com debounce. O drag and drop é otimista com rollback de colunas e summaries. Migration aditiva `20260906010000_crm_board_stage_index`. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
+
+**Ressalvas:** timeline e histórico da oportunidade seguem sem paginação (BUG-08); atividades, reservas e propostas no detalhe seguem em 100 por bloco, por serem limites por oportunidade e não por tenant.
 ## CRM-FIX-05 — Seção de visitas no detalhe da oportunidade — **PENDENTE (MÉDIA)**
 ## CRM-FIX-06 — Preservar motivo de perda no histórico — **PENDENTE (MÉDIA)**
 ## CRM-FIX-07 — Resolver `SalesVisit.companyId` (usar ou remover) — **PENDENTE (BAIXA)**

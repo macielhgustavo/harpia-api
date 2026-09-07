@@ -144,7 +144,7 @@ A fase D (visitas), listada como pendente na auditoria anterior, foi parcialment
 ## Bugs e inconsistências confirmados no código
 
 - **BUG-01 (ALTA) — `stageEnteredAt` não é atualizado no ganho via proposta ou venda.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-01 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `proposals.service.ts:627` e `sales.service.ts:921` gravam o `stageId` da etapa ganha, criam `OpportunityStageHistory` e auditam, mas não tocam em `stageEnteredAt`. Apenas `crm.service.ts:490` o faz. Consequência: uma oportunidade que entrou em Negociação no dia 1 e foi convertida em venda no dia 30 aparece como "29 dias na etapa" já em Ganho, e `isStalled()` pode marcar como estagnada uma oportunidade recém-ganha. O índice `Opportunity_organizationId_stageId_stageEnteredAt_idx` fica não confiável.
-- **BUG-02 (MÉDIA) — truncamento silencioso no Kanban e na agenda.** O funil carrega 50 registros e calcula `stageTotal()` sobre eles; a agenda carrega 100 e filtra as visões no cliente; o seletor de oportunidades em `/crm/visits` carrega 100. Acima desses limites, os totais por etapa, os contadores das abas e a lista de oportunidades agendáveis ficam errados sem qualquer aviso ao usuário.
+- **BUG-02 (MÉDIA) — truncamento silencioso no Kanban e na agenda.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-04 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* O funil carrega 50 registros e calcula `stageTotal()` sobre eles; a agenda carrega 100 e filtra as visões no cliente; o seletor de oportunidades em `/crm/visits` carrega 100. Acima desses limites, os totais por etapa, os contadores das abas e a lista de oportunidades agendáveis ficam errados sem qualquer aviso ao usuário.
 - **BUG-03 (MÉDIA) — `/crm/tasks` não tem visão de concluídas e as abas se sobrepõem.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-03 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `openOnly: true` é fixo na consulta, então nem a aba "Todas" mostra atividades concluídas. Em `matchesView`, uma atividade agendada para hoje mais cedo satisfaz simultaneamente `TODAY` e `OVERDUE`, duplicando a contagem dos badges.
 - **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-02 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
 - **BUG-05 (MÉDIA) — visitas desconectadas do detalhe da oportunidade.** `opportunity-detail.component.html` não possui seção de visitas; elas aparecem apenas como linhas da timeline. Não é possível agendar visita, registrar comparecimento ou ver as visitas da oportunidade a partir do detalhe.
@@ -423,3 +423,99 @@ Cobrem: os filtros exatos de cada uma das cinco abas; a exclusividade mútua ver
 Verificação de que os testes detectam o defeito: reintroduzindo as duas causas originais (`scheduledTo=now` em Atrasadas e `openOnly` fixo em Concluídas), **4 testes falham**, exatamente nos sintomas do BUG-03.
 
 Resultado: suíte do frontend com **448 testes** passando (eram 420) e `ng build` sem erros. O backend permaneceu intocado, com 58 suítes e 290 testes passando.
+
+---
+
+# CRM-FIX-04 — Resolução do BUG-02
+
+Data: 2026-09-06
+
+## Situação
+
+**CORRIGIDO** nos dois repositórios. Uma migration aditiva de índice foi criada; nenhum dado foi alterado.
+
+## Causa raiz
+
+O funil pedia uma página de 50 oportunidades do pipeline inteiro e montava as colunas no cliente. Disso decorriam três problemas encadeados:
+
+1. A distribuição por etapa dependia de quais registros caíram naquela página. Uma etapa podia aparecer vazia só porque suas oportunidades não estavam entre as 50 mais recentes.
+2. `stageTotal()` somava `estimatedValue` apenas dos registros carregados, então o valor financeiro da coluna era **plausível e errado** acima do limite, sem nenhum sinal ao usuário.
+3. O contador da coluna era o tamanho do array local, não a contagem real.
+
+Os mesmos limites arbitrários existiam na agenda (100) e no seletor de oportunidades das visitas (100), este último impedindo agendar visita para qualquer oportunidade fora das 100 mais recentes.
+
+A raiz comum: **agregação e paginação estavam no cliente, sobre um recorte parcial**.
+
+## Arquitetura escolhida
+
+Endpoint novo `GET /crm/board`, mais reuso do endpoint de listagem já existente para as páginas seguintes.
+
+- O board devolve todas as etapas do pipeline com `summary` (`total`, `loaded`, `hasMore`, `estimatedValue`, `weightedValue`), a primeira página de cards e a `pagination` no formato padrão do projeto.
+- `stageLimit` controla os cards por etapa; `stageLimit=0` devolve **apenas agregados**, usado para atualizar os totais depois de mover um card sem recarregar lista alguma.
+- "Carregar mais" de uma coluna usa `GET /crm/opportunities?stageId=...&page=N`, que já existia e já suportava tudo que era preciso. Nenhum endpoint novo foi inventado para isso.
+
+Foi descartado um endpoint único devolvendo todas as oportunidades do pipeline: adiaria o problema em vez de resolvê-lo.
+
+## Agregação
+
+Uma única consulta agregada cobre todas as etapas, agrupada por `(stageId, probability)`. Agrupar também por probabilidade é o que permite calcular o valor ponderado **sem SQL bruto**: `probability` é inteiro de 0 a 100, então os buckets são poucos e limitados, e a soma ponderada é feita com `Prisma.Decimal` sobre eles.
+
+Isso preserva um ganho do CRM-FIX-02: existe **uma só implementação dos filtros**. `buildOpportunityWhere` alimenta a listagem, as páginas de cada coluna e a agregação. SQL bruto teria exigido uma segunda representação do mesmo predicado.
+
+`weightedValue` = `Σ (soma do bucket × probabilidade ÷ 100)`, com fallback para a `defaultProbability` da etapa quando a oportunidade não tem probabilidade — o mesmo critério que a interface já usava para exibir.
+
+**Dinheiro nunca passa por `Number`.** Somas em `Prisma.Decimal`, serialização como string decimal de duas casas, e o frontend trata o valor como string opaca até a formatação.
+
+## Drag and drop
+
+O movimento passou a ser otimista com rollback real:
+
+1. Um snapshot das colunas é tirado antes.
+2. O card é removido da origem e inserido no topo do destino, com `total` e `loaded` ajustados em uma unidade.
+3. Em sucesso, os agregados monetários são relidos com `stageLimit=0` — de propósito, em vez de recalculados no cliente, porque são decimais e não devem passar por float.
+4. Em erro, o snapshot é restaurado por inteiro, colunas e summaries.
+
+Nenhuma lista é recarregada no caminho feliz.
+
+## Outros truncamentos
+
+Varredura feita no CRM por `pageSize`, `take` e `slice`:
+
+| Ponto | Antes | Agora |
+| --- | --- | --- |
+| Funil (`/crm`) | 50 no pipeline inteiro, distribuído no cliente | 20 por etapa, com `Carregar mais` e agregados do servidor |
+| Agenda (`/crm/tasks`) | 100 por visão | 20 por visão, com `Carregar mais` |
+| Seletor de oportunidade em `/crm/visits` | 100 fixos | busca no servidor com debounce de 300 ms |
+| Lista de visitas | 50 por página | inalterado: já tinha paginação real |
+| Atividades no detalhe da oportunidade | 100 | inalterado: limite por oportunidade, não por tenant |
+| Reservas e propostas no detalhe | 100 cada | inalterado: limite por oportunidade; fora do módulo CRM |
+| Timeline da oportunidade | sem limite | inalterado: BUG-08, ainda pendente |
+
+Os `slice` encontrados em `opportunity-form-modal.component.ts` são formatação de data, não truncamento de lista.
+
+## Índice
+
+`20260906010000_crm_board_stage_index` cria `Opportunity_organizationId_stageId_updatedAt_idx`. Justificativa: cada coluna pagina com `WHERE organizationId AND pipelineId AND stageId ORDER BY updatedAt DESC LIMIT n`, e os índices existentes cobriam `createdAt` e `stageEnteredAt`, não a ordenação usada. É `CREATE INDEX IF NOT EXISTS`: aditivo, idempotente, não derruba nada e não reescreve dados.
+
+## Determinismo da paginação
+
+A ordenação de oportunidade já tinha `id` como desempate. A de atividades não tinha, e passou a ter. Sem isso, empates em `completedAt`/`scheduledAt`/`createdAt` poderiam fazer o `Carregar mais` pular ou repetir um registro.
+
+## Testes
+
+**Backend** — `src/crm/crm-board.service.spec.ts`, 15 casos: etapa que cabe numa página; etapa com mais registros que a página; soma financeira sobre todos os registros e não sobre a página; ponderação por bucket sem ponto flutuante; fallback para a probabilidade da etapa; soma ausente tratada como zero; etapa vazia; consolidação do pipeline; mesmo predicado na agregação e em cada página; tenant nunca vindo do cliente; pipeline de outro tenant recusado; ordenação e limite por etapa; uma página por etapa e uma só agregação; e `stageLimit=0` sem nenhuma consulta de linhas.
+
+**Frontend** — `crm.component.spec.ts` (14 casos): contagem e valores do servidor; `stageLimit` enviado; quantos faltam carregar; coluna completa sem botão; `Carregar mais` afetando só a própria coluna; sem duplicar registros entre páginas; total do servidor preservado; DnD movendo card e atualizando summaries; DnD relendo apenas agregados; rollback restaurando colunas e summaries; filtros no board e no `Carregar mais`; troca para a lista com paginação de servidor.
+
+`crm-visits.component.spec.ts` (7 casos): página inicial limitada; overflow informado; busca no servidor após o debounce; rajada de teclas gerando uma requisição só; oportunidade além das antigas 100 sendo encontrada; termo repetido não reconsultando; resultado vazio.
+
+`crm-tasks.component.spec.ts` ganhou 3 casos de paginação: aviso e botão com o restante, página seguinte sem duplicar registros, e nenhuma requisição quando não há mais páginas.
+
+Resultado: backend com **59 suítes e 304 testes**, frontend com **472 testes**, ambos os builds limpos.
+
+## Limitações que permanecem
+
+- Timeline e histórico da oportunidade seguem sem paginação (BUG-08).
+- Atividades, reservas e propostas no detalhe da oportunidade seguem em 100 por bloco. São limites por oportunidade, não por tenant, e reservas/propostas ficam fora do módulo CRM.
+- A ordenação de Concluídas em `/crm/tasks` continua herdando `completedAt` ascendente, como registrado no CRM-FIX-03.
+- O `Carregar mais` do funil não tem contrapartida de "carregar menos": recolher uma coluna exige recarregar o board.
