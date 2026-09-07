@@ -4,7 +4,7 @@ O CRM é isolado por organização em todas as tabelas e consultas. Nenhum endpo
 
 Em produção, migrations pendentes são aplicadas pela própria inicialização da API antes de o serviço começar a aceitar requisições (`src/database/run-production-migrations.ts`, chamado por `src/main.ts`). A recuperação automática é limitada à migration idempotente `20260904040000_sales_visits`, caso um deploy anterior tenha deixado somente ela marcada como falha (P3009).
 
-Última verificação contra o código: 2026-09-06 (backend `cfcca47`, frontend `33fc566`).
+Última verificação contra o código: 2026-09-07 (backend `43401f5`, frontend `82e7904`).
 
 ## Modelo
 
@@ -104,11 +104,40 @@ Pedir um status fechado junto de `openOnly` é insatisfazível por definição e
 ## Interface (harpia-web)
 
 - `/crm`: Kanban e modo lista, busca, filtros por pipeline/etapa/responsável/empreendimento, drag and drop nativo com modal de confirmação, tempo na etapa, estados de atraso e estagnação, criação, edição e movimentação. O funil consome `GET /crm/board`: cada coluna tem paginação própria e os totais vêm do servidor.
-- `/crm/opportunities/:id`: resumo comercial, histórico de etapas, timeline unificada, reservas, propostas e atividades. Não possui seção de visitas nem de venda.
+- `/crm/opportunities/:id`: resumo comercial, histórico de etapas, timeline unificada, **visitas**, reservas, propostas e atividades. Não possui seção de venda. A ação rápida `Agendar visita` fica no cabeçalho, ao lado de `Mover etapa`, `Editar` e `Excluir`. Ver a seção de visitas abaixo.
 - `/crm/tasks`: agenda comercial com as visões Hoje, Atrasadas, Próximas, Concluídas e Todas as abertas, filtros por responsável e prioridade, ações de iniciar/concluir e `Carregar mais` por visão. Cada visão é uma consulta própria ao servidor; ver a semântica abaixo.
-- `/crm/visits`: lista paginada com filtros por status, responsável e período; agendamento com busca de oportunidade no servidor, registro de comparecimento com resultado, ausência e cancelamento com motivo. Não permite reagendar nem filtrar por empreendimento.
+- `/crm/visits`: agenda do tenant. Lista paginada com filtros por status, responsável e período; agendamento com busca de oportunidade no servidor, registro de comparecimento com resultado, ausência e cancelamento com motivo. Não permite reagendar nem filtrar por empreendimento. O reagendamento existe apenas dentro da oportunidade.
 
 Todas as telas tratam carregamento, erro com retry e vazio, espelham `CRM_READ`/`CRM_WRITE` e são navegáveis pelo grupo "Comercial" do menu. O backend permanece a autoridade de RBAC.
+
+### Visitas no detalhe da oportunidade
+
+A seção `Visitas` (`src/app/pages/crm/visits-section.component.ts`) torna a oportunidade um ponto de operação completo: nada do ciclo de visitas daquele lead exige ir até `/crm/visits`.
+
+Ela é um componente próprio, no mesmo padrão de reservas e propostas, e **não** participa do `forkJoin` que carrega o detalhe. Tem loading, erro, retry e empty state próprios: uma falha ao listar visitas não derruba o resumo comercial, a timeline nem as atividades.
+
+| Ação | Chamada |
+| --- | --- |
+| Listar | `GET /crm/visits?opportunityId=<id>&pageSize=100` |
+| Agendar | `POST /crm/visits` |
+| Reagendar | `PATCH /crm/visits/:id` com `scheduledAt`, `durationMinutes`, responsável, local e observações |
+| Marcar como realizada | `PATCH` com `status=REALIZADA`, `outcome` e observação |
+| Não compareceu | `PATCH` com `status=NAO_COMPARECEU` apenas |
+| Cancelar | `PATCH` com `status=CANCELADA` e `cancellationReason` |
+
+Regras da seção:
+
+- **Ordenação.** O endpoint devolve `scheduledAt` ascendente; a seção separa em `Próximas visitas` (status `AGENDADA`, mais cedo primeiro, único bloco com ações) e `Histórico` (demais status, mais recente primeiro). A reordenação é feita no cliente sobre um recorte *por oportunidade*, não por tenant, e o excedente de 100 é informado ao usuário em vez de descartado em silêncio.
+- **Estados.** Os quatro status aparecem com rótulo em texto e ícone. A cor é sempre redundante.
+- **Contexto pré-preenchido.** O formulário de agendamento herda empreendimento, unidade e responsável da oportunidade. `personId` e `organizationId` continuam sendo derivados da oportunidade pelo backend; o cliente não os envia.
+- **Sem unidade.** Quando a oportunidade não tem unidade, agenda-se visita ao empreendimento e `unitId` não é enviado. `unitId` nunca é obrigatório.
+- **Sem empreendimento.** O empreendimento pode ser escolhido no formulário. Trocar de empreendimento limpa a unidade selecionada, porque uma unidade pertence a exatamente um empreendimento; a validação do par continua sendo a de `resolveLocation`, no backend.
+- **Reagendar é `PATCH` na mesma visita.** Id, tenant, oportunidade, criador e trilha de auditoria são preservados; não existe cancelar-e-recriar. O reagendamento **não** altera empreendimento nem unidade, porque `UpdateSalesVisitDto` não aceita esses campos.
+- **Não comparecimento preserva `scheduledAt`.** Só o status é enviado; o marco temporal é gravado pelo backend.
+- **Cancelamento exige motivo na UI**, porque é obrigatório no domínio. A visita permanece no histórico com o motivo visível.
+- **A timeline não é duplicada.** Após qualquer mutação a seção recarrega a própria lista e o detalhe refaz `GET /crm/opportunities/:id/timeline`. Nenhum evento é fabricado no cliente.
+- **Permissões.** `CRM_READ` condiciona a seção inteira e a consulta; `CRM_WRITE` condiciona todas as ações, inclusive quando invocadas diretamente. O guard do `VisitsController` continua sendo a autoridade.
+- **Escopo.** A seção descarta qualquer visita cujo `opportunityId` não seja o da oportunidade aberta — defesa em profundidade sobre um endpoint que já filtra por tenant e por oportunidade.
 
 ### Visões da agenda comercial (`/crm/tasks`)
 
@@ -203,4 +232,4 @@ Nenhuma lista do CRM é apresentada como completa quando não é.
 - **`/crm/tasks`**: 20 atividades por página, com `Carregar mais` por visão. Os badges continuam vindo de `pagination.total`.
 - **`/crm/visits`**: o seletor de oportunidade passou a ser busca no servidor com *debounce* de 300 ms, cobrindo qualquer oportunidade do tenant. A quantidade não exibida é informada.
 
-Limites que permanecem, por serem por oportunidade e não por tenant: atividades, reservas e propostas dentro do detalhe da oportunidade carregam até 100 registros cada, e a timeline segue sem paginação.
+Limites que permanecem, por serem por oportunidade e não por tenant: atividades, visitas, reservas e propostas dentro do detalhe da oportunidade carregam até 100 registros cada — a seção de visitas informa quantas não está mostrando quando o total excede a página — e a timeline segue sem paginação.

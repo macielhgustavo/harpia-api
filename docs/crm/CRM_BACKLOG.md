@@ -11,7 +11,7 @@ Antes de executar qualquer item, comparar com `docs/crm.md`, `docs/crm-master-au
 - **PENDENTE** — não existe.
 - **BLOQUEADO** — depende de outro item ou de decisão externa.
 
-Estados verificados no código em 2026-09-06 (backend `cfcca47`, frontend `33fc566`).
+Estados verificados no código em 2026-09-07 (backend `43401f5`, frontend `82e7904`).
 
 # Fase A — Re-auditoria
 
@@ -45,16 +45,15 @@ Bloqueio de qualidade: totais e contagens por etapa são calculados sobre uma p�
 Busca, filtros, paginação e navegação para detalhe existem. **Ordenação não existe** — nem na UI nem como parâmetro do backend. Faltam colunas de última atividade, próxima atividade e score.
 
 ## CRM-003 — Detalhe 360º — **PARCIAL**
-Existem: pessoa, estágio, responsável, empreendimento, unidade, origem, valor, probabilidade, timeline, atividades, reservas e propostas.
-Faltam: **visitas** (BUG-05), venda, tipologia, tags, score, health e próxima ação.
+Existem: pessoa, estágio, responsável, empreendimento, unidade, origem, valor, probabilidade, timeline, atividades, **visitas** (CRM-FIX-05), reservas e propostas.
+Faltam: venda, tipologia, tags, score, health e próxima ação.
 
 ## CRM-004 — Filtros avançados — **PARCIAL**
 Existem: responsável, etapa, pipeline, empreendimento e busca textual. O backend também aceita `personId` e `source`, mas a UI não os expõe.
 Faltam: origem na UI, score, próxima atividade, período e status (aberta/ganha/perdida) — nenhum destes existe no backend.
 
-## CRM-005 — Ações rápidas — **PARCIAL**
-Existem: registrar contato/criar tarefa (modal de atividade), reservar unidade e criar proposta (seções embutidas), marcar ganho e marcar perda (modal de movimentação).
-Falta: **agendar visita a partir da oportunidade**.
+## CRM-005 — Ações rápidas — **CONCLUÍDO**
+As sete ações do `CRM_UX.md` existem no detalhe: registrar contato e criar tarefa (modal de atividade), **agendar visita** (cabeçalho e seção de visitas, CRM-FIX-05), reservar unidade e criar proposta (seções embutidas), marcar ganho e marcar perda (modal de movimentação). Nenhuma delas exige navegação intermediária.
 
 # Fase C — Timeline e produtividade
 
@@ -76,9 +75,10 @@ Campo `result` no backend e no formulário de atividade, sem sobrescrever histó
 
 # Fase D — Visitas
 
-## CRM-011 — Experiência de visitas — **PARCIAL**
-`SalesVisit` existe. Criação, agenda, comparecimento, ausência, cancelamento com motivo e resultado funcionam em `/crm/visits`.
-Faltam: **reagendamento/edição pela UI** (o `PATCH` aceita `scheduledAt` e `durationMinutes`, mas nenhuma tela os envia) e a seção de visitas no detalhe da oportunidade.
+## CRM-011 — Experiência de visitas — **CONCLUÍDO**
+`SalesVisit` existe. Criação, agenda, comparecimento, ausência, cancelamento com motivo e resultado funcionam em `/crm/visits`, e o ciclo inteiro — incluindo **reagendamento** — funciona dentro do detalhe da oportunidade desde o CRM-FIX-05.
+
+**Ressalva:** o reagendamento altera data, duração, responsável, local e observações, mas não empreendimento nem unidade, porque `UpdateSalesVisitDto` não aceita esses campos. `/crm/visits` continua sem reagendamento próprio.
 
 ## CRM-012 — Agenda de visitas — **PARCIAL**
 Filtros por data, corretor e status existem. **Filtro por empreendimento não existe** — nem no DTO do backend nem na UI.
@@ -148,10 +148,10 @@ Existe motor de automação apenas para cobrança (`collections-automation.servi
 
 ## CRM-047 — Mobile — **PARCIAL** (layouts responsivos existem; funil e lista dependem de scroll horizontal)
 ## CRM-048 — Busca global — **PENDENTE**
-## CRM-049 — Empty states — **PARCIAL** (existem em todas as telas de CRM, mas sem CTA de ação)
+## CRM-049 — Empty states — **PARCIAL** (existem em todas as telas de CRM; só a seção de visitas do detalhe tem CTA de ação)
 ## CRM-050 — Performance — **PARCIAL** (paginação no servidor existe; timeline e histórico são ilimitados)
 ## CRM-051 — Observabilidade — **PENDENTE**
-## CRM-052 — E2E completo — **PENDENTE** (`npm run test:e2e` aponta para um diretório inexistente; nenhuma tela de CRM tem teste de componente)
+## CRM-052 — E2E completo — **PENDENTE** (`npm run test:e2e` aponta para um diretório inexistente. Testes de componente já existem para `/crm`, `/crm/tasks`, `/crm/visits` e o detalhe da oportunidade; não há E2E de ponta a ponta)
 
 # Correções pendentes levantadas pela re-auditoria
 
@@ -174,7 +174,10 @@ Resolvido em 2026-09-06, apenas no frontend. Cada aba virou uma consulta própri
 Resolvido em 2026-09-06 nos dois repositórios. Criado `GET /crm/board`, que devolve cada etapa com página própria e agregados (`total`, `loaded`, `hasMore`, `estimatedValue`, `weightedValue`) calculados sobre o conjunto filtrado inteiro. A agregação é uma única consulta agrupada por `(stageId, probability)`, o que permite o valor ponderado sem SQL bruto e mantém uma só implementação dos filtros, em `buildOpportunityWhere`. Dinheiro é somado em `Prisma.Decimal` e serializado como string. O funil carrega 20 cards por etapa com `Carregar mais`; a agenda pagina por visão; o seletor de oportunidade em `/crm/visits` virou busca no servidor com debounce. O drag and drop é otimista com rollback de colunas e summaries. Migration aditiva `20260906010000_crm_board_stage_index`. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
 
 **Ressalvas:** timeline e histórico da oportunidade seguem sem paginação (BUG-08); atividades, reservas e propostas no detalhe seguem em 100 por bloco, por serem limites por oportunidade e não por tenant.
-## CRM-FIX-05 — Seção de visitas no detalhe da oportunidade — **PENDENTE (MÉDIA)**
+## CRM-FIX-05 — Seção de visitas no detalhe da oportunidade — **CONCLUÍDO**
+Resolvido em 2026-09-07, apenas no frontend. O backend já cobria todo o ciclo: `GET|POST /crm/visits` e `PATCH /crm/visits/:id` foram conferidos item a item antes de qualquer alteração e nenhuma lacuna real de contrato foi encontrada — nenhuma migration, DTO ou regra de domínio foi tocada. Criado `VisitsSectionComponent`, componente próprio no padrão de reservas e propostas, com loading, erro, retry e empty state independentes: uma falha ao listar visitas não derruba o resto do detalhe. A seção separa `Próximas visitas` (status `AGENDADA`, mais cedo primeiro, único bloco com ações) de `Histórico` (demais status, mais recente primeiro), e informa o excedente quando o total passa da página de 100. Agendar, reagendar, marcar como realizada com `outcome` estruturado, registrar não comparecimento e cancelar com motivo acontecem dentro da oportunidade. O reagendamento é `PATCH` na mesma visita, preservando id, tenant, oportunidade, criador e auditoria. A ação rápida `Agendar visita` foi ao cabeçalho do detalhe. Criado `opportunity-detail.component.spec.ts`, primeiro teste de componente do detalhe, com 29 casos. Suíte do frontend com 501 testes passando e build limpo. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
+
+**Ressalvas:** o reagendamento não altera empreendimento nem unidade, porque `UpdateSalesVisitDto` não aceita esses campos; o backend não possui máquina de estados de visita, então a restrição de agir só sobre visitas `AGENDADA` é convenção de UI e não invariante de domínio; `GET /crm/visits` segue sem ordenação e sem filtro por empreendimento (CRM-012).
 ## CRM-FIX-06 — Preservar motivo de perda no histórico — **PENDENTE (MÉDIA)**
 ## CRM-FIX-07 — Resolver `SalesVisit.companyId` (usar ou remover) — **PENDENTE (BAIXA)**
 ## CRM-FIX-08 — Paginar timeline e histórico — **PENDENTE (BAIXA)**
@@ -186,4 +189,4 @@ João Silva → Instagram → Residencial Aurora → 2 quartos → até R$ 500 m
 
 Validar timeline, score, health, próxima ação, auditoria, tenancy, RBAC e ausência de duplicidade.
 
-Hoje esse cenário é executável até "reserva → proposta → aceite → venda", com as ressalvas de que o interesse imobiliário, as unidades compatíveis, o score e a próxima ação ainda não existem, e a visita precisa ser agendada fora da tela da oportunidade.
+Hoje esse cenário é executável até "reserva → proposta → aceite → venda", com a ressalva de que o interesse imobiliário, as unidades compatíveis, o score e a próxima ação ainda não existem. Desde o CRM-FIX-05, todo o trecho de visita — agendar, reagendar, realizar com resultado, registrar ausência e cancelar — é executável sem sair da tela da oportunidade.

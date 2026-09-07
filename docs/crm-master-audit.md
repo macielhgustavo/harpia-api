@@ -147,7 +147,7 @@ A fase D (visitas), listada como pendente na auditoria anterior, foi parcialment
 - **BUG-02 (MÉDIA) — truncamento silencioso no Kanban e na agenda.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-04 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* O funil carrega 50 registros e calcula `stageTotal()` sobre eles; a agenda carrega 100 e filtra as visões no cliente; o seletor de oportunidades em `/crm/visits` carrega 100. Acima desses limites, os totais por etapa, os contadores das abas e a lista de oportunidades agendáveis ficam errados sem qualquer aviso ao usuário.
 - **BUG-03 (MÉDIA) — `/crm/tasks` não tem visão de concluídas e as abas se sobrepõem.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-03 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `openOnly: true` é fixo na consulta, então nem a aba "Todas" mostra atividades concluídas. Em `matchesView`, uma atividade agendada para hoje mais cedo satisfaz simultaneamente `TODAY` e `OVERDUE`, duplicando a contagem dos badges.
 - **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-02 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
-- **BUG-05 (MÉDIA) — visitas desconectadas do detalhe da oportunidade.** `opportunity-detail.component.html` não possui seção de visitas; elas aparecem apenas como linhas da timeline. Não é possível agendar visita, registrar comparecimento ou ver as visitas da oportunidade a partir do detalhe.
+- **BUG-05 (MÉDIA) — visitas desconectadas do detalhe da oportunidade.** *(CORRIGIDO em 2026-09-07 por CRM-FIX-05 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `opportunity-detail.component.html` não possui seção de visitas; elas aparecem apenas como linhas da timeline. Não é possível agendar visita, registrar comparecimento ou ver as visitas da oportunidade a partir do detalhe.
 - **BUG-06 (MÉDIA) — `lostReason` é destruído.** `crm.service.ts:487` grava `lostReason: null` ao mover para qualquer etapa não perdida, e os metadados de `OPPORTUNITY_LOST` não guardam o texto. O motivo da perda torna-se irrecuperável após reabertura, contrariando a diretriz de preservar histórico comercial.
 - **BUG-07 (BAIXA) — `SalesVisit.companyId` é schema morto.** A coluna e a FK existem no banco (migration `20260905010000_sales_visits_company_scope`) e no schema, mas nenhum service, DTO ou include a escreve ou lê.
 - **BUG-08 (BAIXA) — timeline e histórico sem limite.** `findOpportunityTimeline` dispara seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
@@ -519,3 +519,103 @@ Resultado: backend com **59 suítes e 304 testes**, frontend com **472 testes**,
 - Atividades, reservas e propostas no detalhe da oportunidade seguem em 100 por bloco. São limites por oportunidade, não por tenant, e reservas/propostas ficam fora do módulo CRM.
 - A ordenação de Concluídas em `/crm/tasks` continua herdando `completedAt` ascendente, como registrado no CRM-FIX-03.
 - O `Carregar mais` do funil não tem contrapartida de "carregar menos": recolher uma coluna exige recarregar o board.
+
+---
+
+# CRM-FIX-05 — Resolução do BUG-05
+
+Data: 2026-09-07
+
+## Situação
+
+**CORRIGIDO**, somente no frontend. O backend não foi alterado: `GET|POST /crm/visits` e `PATCH /crm/visits/:id` já cobriam todo o ciclo pedido.
+
+## A lacuna
+
+`SalesVisit` existia como entidade completa desde 2026-09-04 e a tela `/crm/visits` já agendava, registrava comparecimento, ausência e cancelamento. O detalhe da oportunidade, porém, não tinha nenhuma seção de visitas: elas apareciam apenas como linhas da timeline, sem estado operacional e sem ação.
+
+Na prática o corretor abria a oportunidade para decidir o próximo passo, via que houve uma visita, e precisava sair para `/crm/visits`, encontrar aquela visita no meio da agenda do tenant e agir lá. O ciclo de visitas do lead não era gerenciável de dentro do lead.
+
+## Verificação do contrato antes de escrever código
+
+Cada parte do ciclo foi conferida contra o backend atual antes de decidir se havia mudança a fazer:
+
+| Necessidade | Contrato existente | Mudança no backend |
+| --- | --- | --- |
+| Listar visitas de uma oportunidade | `GET /crm/visits?opportunityId=` | nenhuma |
+| Agendar com contexto | `POST /crm/visits` deriva pessoa e tenant da oportunidade | nenhuma |
+| Visita sem unidade | `resolveLocation` aceita só `developmentId` | nenhuma |
+| Visita sem empreendimento | `resolveLocation` aceita ambos nulos e valida o par | nenhuma |
+| Reagendar | `PATCH` aceita `scheduledAt` e `durationMinutes` | nenhuma |
+| Realizar com resultado | `PATCH` com `status=REALIZADA` e `outcome` | nenhuma |
+| Não comparecimento | `PATCH` com `status=NAO_COMPARECEU` | nenhuma |
+| Cancelar com motivo | `PATCH` exige `cancellationReason` | nenhuma |
+| Timeline | `GET /crm/opportunities/:id/timeline` já agrega visitas | nenhuma |
+
+A conclusão é que o BUG-05 era exclusivamente uma lacuna de interface. Nenhuma migration, nenhum DTO e nenhuma regra de domínio foram tocados.
+
+## Arquitetura escolhida
+
+Componente próprio `VisitsSectionComponent` (`src/app/pages/crm/visits-section.component.ts`), no mesmo padrão de `ReservationsSectionComponent` e `ProposalsSectionComponent`: recebe o contexto da oportunidade por `@Input`, carrega sozinho e avisa o pai por um `@Output`.
+
+A alternativa — carregar as visitas no `forkJoin` do detalhe — foi descartada de propósito. Naquele `forkJoin`, uma falha em qualquer fonte derruba a página inteira. A seção precisa de loading, erro, retry e empty state próprios: uma falha ao listar visitas não pode inutilizar o resumo comercial, a timeline nem as atividades.
+
+## Ordenação
+
+O endpoint ordena por `scheduledAt` ascendente. A seção reordena os registros já carregados em dois blocos:
+
+- **Próximas visitas** — status `AGENDADA`, mais cedo primeiro. É o bloco operacional, o único com ações.
+- **Histórico** — todo o resto (`REALIZADA`, `CANCELADA`, `NAO_COMPARECEU`), mais recente primeiro.
+
+Reordenar no cliente é aceitável aqui e não repete o erro do BUG-02: o recorte é *por oportunidade*, não por tenant, e a página pedida é a máxima que o endpoint aceita (100). Quando `total` excede o que veio, a seção informa quantas visitas não está mostrando, em vez de fingir completude. Nenhum parâmetro de ordenação foi inventado no backend.
+
+## Estados
+
+Os quatro status têm rótulo em texto, ícone próprio e cor. **A cor é sempre redundante**: `Agendada`, `Realizada`, `Cancelada` e `Não compareceu` são legíveis sem ela.
+
+## Oportunidade sem unidade e sem empreendimento
+
+- Sem unidade: o formulário pré-preenche o empreendimento e deixa a unidade em "Visita ao empreendimento". `unitId` não é enviado.
+- Sem empreendimento: o seletor fica aberto para escolha, e trocar de empreendimento **limpa a unidade selecionada**, porque uma unidade pertence a exatamente um empreendimento e o par inconsistente seria recusado pelo backend. A validação continua sendo a de `resolveLocation`; não há regra paralela no cliente.
+
+## Reagendamento
+
+Reagendar é `PATCH` na mesma visita. Ela conserva id, tenant, oportunidade, `createdByUser` e a trilha de auditoria; `SALES_VISIT_UPDATED` registra os campos alterados. **Não** se cancela e recria.
+
+O formulário de reagendamento não expõe empreendimento e unidade porque o `UpdateSalesVisitDto` não os aceita — mudar o local de uma visita já marcada exige alteração de contrato e ficou fora desta tarefa. Está registrado como limitação.
+
+## Conclusão, ausência e cancelamento
+
+- **Realizada**: diálogo com `outcome` estruturado e observação livre. Os cinco valores oferecidos são os do enum real (`INTERESSE_ALTO`, `INTERESSE_MEDIO`, `INTERESSE_BAIXO`, `SEM_INTERESSE`, `REAGENDAR`), não a nomenclatura sugerida no enunciado da tarefa.
+- **Não compareceu**: envia apenas `status`. `scheduledAt` permanece o instante que foi perdido; o marco temporal é gravado pelo backend.
+- **Cancelar**: motivo obrigatório na UI, porque é obrigatório no domínio. A visita não é apagada e continua no histórico com o motivo visível.
+
+## Timeline
+
+A seção e a timeline não competem. Depois de qualquer mutação a seção recarrega a própria lista e emite `changed`; o detalhe refaz `GET /crm/opportunities/:id/timeline`. **Nenhum evento é fabricado no cliente** — o backend segue sendo a fonte de verdade do que aconteceu, como exige a ADR-008.
+
+## Permissões
+
+`CRM_READ` esconde a seção inteira e impede a consulta; `CRM_WRITE` esconde todas as ações. Os métodos de mutação também recusam execução direta sem `CRM_WRITE`, de modo que a ausência do botão não é a única barreira no cliente. Isso continua sendo espelho de UX: o guard global do `VisitsController` permanece a autoridade.
+
+Uma defesa a mais foi adicionada na leitura: a seção descarta qualquer visita cujo `opportunityId` não seja o da oportunidade aberta. O endpoint já filtra por tenant e por oportunidade; o filtro extra garante que a seção nunca exiba uma visita de outro lead mesmo diante de uma resposta inesperada.
+
+## Ações rápidas
+
+`Agendar visita` passou a existir no cabeçalho do detalhe, ao lado de `Mover etapa`, `Editar` e `Excluir`, abrindo o formulário da seção sem navegação intermediária. As demais ações da lista do `CRM_UX.md` já existiam: registrar contato e criar tarefa no modal de atividade, reservar unidade e criar proposta nas seções embutidas, marcar ganho e marcar perda no modal de movimentação.
+
+## Testes
+
+`src/app/pages/crm/opportunity-detail.component.spec.ts` é o **primeiro teste de componente do detalhe da oportunidade**, fechando outra parte da lacuna registrada na re-auditoria. São 29 casos, com mocks explícitos de todos os serviços, inclusive os das seções filhas.
+
+Cobrem: presença da seção; consulta restrita ao `opportunityId` correto; data, empreendimento, unidade, responsável e status renderizados; resultado de visita realizada; ordenação de próximas e histórico; visita de outra oportunidade nunca exibida; empty state com CTA; loading próprio sem bloquear a página; erro próprio preservando resumo e timeline; retry sem recarregar o detalhe; ação rápida do cabeçalho; pré-preenchimento a partir da oportunidade; criação vinculada; recusa de submissão sem data; oportunidade sem `unitId`; escolha de empreendimento quando a oportunidade não tem; limpeza da unidade ao trocar de empreendimento; reagendamento sem alterar status; pré-preenchimento do reagendamento; conclusão com `outcome`; enum real oferecido; não comparecimento preservando o horário; cancelamento com motivo; recusa de cancelamento sem motivo; recarga da seção e da timeline após ação; erro de ação sem destruir a página; e ausência de `CRM_WRITE` e de `CRM_READ`.
+
+Resultado: frontend com **501 testes** passando (eram 472) e `ng build` limpo. O backend permaneceu intocado, com 59 suítes e 304 testes.
+
+## Limitações que permanecem
+
+- **O reagendamento não muda empreendimento nem unidade.** `UpdateSalesVisitDto` não aceita esses campos; alterar o local de uma visita já marcada exigiria mudança de contrato no backend.
+- **O backend não tem máquina de estados de visita.** `PATCH` aceita qualquer transição, inclusive de `CANCELADA` de volta para `REALIZADA`. A interface só oferece ações sobre visitas `AGENDADA`, mas isso é convenção de UI, não invariante de domínio.
+- **`GET /crm/visits` não aceita ordenação nem filtro por empreendimento** (CRM-012), e não existe `GET /crm/visits/:id`.
+- **A seção carrega uma página de 100 visitas por oportunidade.** O excedente é informado, não paginado — mesmo tratamento dado a atividades, reservas e propostas no detalhe.
+- BUG-08 (paginação da timeline), BUG-06 (`lostReason`), BUG-07 (`SalesVisit.companyId`) e BUG-09 (`result` livre em visita cancelada) seguem abertos: estavam explicitamente fora do escopo desta tarefa.
