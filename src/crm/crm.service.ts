@@ -566,11 +566,6 @@ export class CrmService {
           include: OPPORTUNITY_INCLUDE,
         });
       }
-      if (stage.isLost && !dto.lostReason?.trim()) {
-        throw new BadRequestException(
-          'Informe o motivo ao marcar a oportunidade como perdida',
-        );
-      }
       const entries = await applyOpportunityStageChange(tx, {
         organizationId: actor.organizationId,
         actorUserId: actor.id,
@@ -607,7 +602,7 @@ export class CrmService {
           where: { opportunityId: id, organizationId },
           include: {
             fromStage: { select: { name: true } },
-            toStage: { select: { name: true } },
+            toStage: { select: { name: true, isLost: true } },
             changedByUser: { select: { id: true, name: true } },
           },
         }),
@@ -648,16 +643,18 @@ export class CrmService {
       ]);
 
     const events = [
+      // A loss keeps its reason here forever: this row is never rewritten, so
+      // reopening, moving again or winning later cannot erase it.
       ...stageHistory.map((item) => ({
         id: `stage:${item.id}`,
         type: 'STAGE_CHANGED' as const,
         occurredAt: item.changedAt,
-        title: item.fromStage
-          ? `Etapa alterada para ${item.toStage.name}`
-          : `Oportunidade criada em ${item.toStage.name}`,
-        description: item.fromStage
-          ? `Movida de ${item.fromStage.name} para ${item.toStage.name}.`
-          : 'Entrada registrada no funil comercial.',
+        title: item.toStage.isLost
+          ? 'Oportunidade marcada como perdida'
+          : item.fromStage
+            ? `Etapa alterada para ${item.toStage.name}`
+            : `Oportunidade criada em ${item.toStage.name}`,
+        description: this.stageEventDescription(item),
         status: null,
         actor: item.changedByUser,
       })),
@@ -719,6 +716,23 @@ export class CrmService {
       const byDate = b.occurredAt.getTime() - a.occurredAt.getTime();
       return byDate || a.id.localeCompare(b.id);
     });
+  }
+
+  /**
+   * The reason is only appended for the events that actually carry one, so a
+   * win, a reopening or any non terminal move never shows a loss reason.
+   */
+  private stageEventDescription(item: {
+    fromStage: { name: string } | null;
+    toStage: { name: string; isLost: boolean };
+    lostReason: string | null;
+  }) {
+    const movement = item.fromStage
+      ? `Movida de ${item.fromStage.name} para ${item.toStage.name}.`
+      : 'Entrada registrada no funil comercial.';
+    return item.toStage.isLost && item.lostReason
+      ? `${movement} Motivo: ${item.lostReason}`
+      : movement;
   }
 
   async findActivities(

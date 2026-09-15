@@ -448,6 +448,10 @@ model OpportunityStageHistory {
   changedByUserId String
   changedByUser   User         @relation("OpportunityStageChangedBy", fields: [changedByUserId], references: [id], onDelete: Restrict)
   changedAt       DateTime     @default(now())
+  /// Reason of this particular loss. Written only when `toStage.isLost`, never
+  /// rewritten afterwards: this row is the historical source of truth, while
+  /// `Opportunity.lostReason` only describes the current state.
+  lostReason      String?
 
   @@index([organizationId, opportunityId, changedAt])
   @@index([changedByUserId, changedAt])

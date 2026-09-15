@@ -85,6 +85,11 @@ Follow-ups, tarefas e atividades devem reutilizar a estrutura atual sempre que p
 
 Novas frentes grandes fora do CRM exigem justificativa forte até o CRM atingir maturidade alta.
 
+## ADR-018 — Motivo histórico pertence ao evento de perda
+**Status:** APROVADO
+
+`Opportunity.lostReason` representa o estado atual. Cada entrada em etapa perdida preserva seu próprio motivo imutável em `OpportunityStageHistory.lostReason`, que é a fonte de verdade para timeline e relatórios. `AuditLog` recebe uma cópia sanitizada para rastreabilidade, mas não substitui o histórico comercial.
+
 # Template
 
 ## ADR-XXX — Título

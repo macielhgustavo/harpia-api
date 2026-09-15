@@ -148,7 +148,7 @@ A fase D (visitas), listada como pendente na auditoria anterior, foi parcialment
 - **BUG-03 (MÉDIA) — `/crm/tasks` não tem visão de concluídas e as abas se sobrepõem.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-03 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `openOnly: true` é fixo na consulta, então nem a aba "Todas" mostra atividades concluídas. Em `matchesView`, uma atividade agendada para hoje mais cedo satisfaz simultaneamente `TODAY` e `OVERDUE`, duplicando a contagem dos badges.
 - **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-02 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
 - **BUG-05 (MÉDIA) — visitas desconectadas do detalhe da oportunidade.** *(CORRIGIDO em 2026-09-07 por CRM-FIX-05 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `opportunity-detail.component.html` não possui seção de visitas; elas aparecem apenas como linhas da timeline. Não é possível agendar visita, registrar comparecimento ou ver as visitas da oportunidade a partir do detalhe.
-- **BUG-06 (MÉDIA) — `lostReason` é destruído.** `crm.service.ts:487` grava `lostReason: null` ao mover para qualquer etapa não perdida, e os metadados de `OPPORTUNITY_LOST` não guardam o texto. O motivo da perda torna-se irrecuperável após reabertura, contrariando a diretriz de preservar histórico comercial.
+- **BUG-06 (MÉDIA) — `lostReason` é destruído.** *(CORRIGIDO em 2026-09-15 por CRM-FIX-06 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `crm.service.ts:487` grava `lostReason: null` ao mover para qualquer etapa não perdida, e os metadados de `OPPORTUNITY_LOST` não guardam o texto. O motivo da perda torna-se irrecuperável após reabertura, contrariando a diretriz de preservar histórico comercial.
 - **BUG-07 (BAIXA) — `SalesVisit.companyId` é schema morto.** A coluna e a FK existem no banco (migration `20260905010000_sales_visits_company_scope`) e no schema, mas nenhum service, DTO ou include a escreve ou lê.
 - **BUG-08 (BAIXA) — timeline e histórico sem limite.** `findOpportunityTimeline` dispara seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
 - **BUG-09 (BAIXA) — `result` livre em visita cancelada.** Em `visits.service.ts`, `outcome` é zerado fora de `REALIZADA`, mas `result` não é validado nem limpo.
@@ -618,4 +618,148 @@ Resultado: frontend com **501 testes** passando (eram 472) e `ng build` limpo. O
 - **O backend não tem máquina de estados de visita.** `PATCH` aceita qualquer transição, inclusive de `CANCELADA` de volta para `REALIZADA`. A interface só oferece ações sobre visitas `AGENDADA`, mas isso é convenção de UI, não invariante de domínio.
 - **`GET /crm/visits` não aceita ordenação nem filtro por empreendimento** (CRM-012), e não existe `GET /crm/visits/:id`.
 - **A seção carrega uma página de 100 visitas por oportunidade.** O excedente é informado, não paginado — mesmo tratamento dado a atividades, reservas e propostas no detalhe.
-- BUG-08 (paginação da timeline), BUG-06 (`lostReason`), BUG-07 (`SalesVisit.companyId`) e BUG-09 (`result` livre em visita cancelada) seguem abertos: estavam explicitamente fora do escopo desta tarefa.
+- Ao término do CRM-FIX-05, BUG-08 (paginação da timeline), BUG-06 (`lostReason`), BUG-07 (`SalesVisit.companyId`) e BUG-09 (`result` livre em visita cancelada) seguiam abertos: estavam explicitamente fora do escopo daquela tarefa. O BUG-06 foi corrigido depois, no CRM-FIX-06 abaixo.
+
+---
+
+# CRM-FIX-06 — Resolução do BUG-06
+
+Data: 2026-09-15
+
+## Situação
+
+**CORRIGIDO no código para novas perdas.** A migration é aditiva e não faz backfill. Motivos antigos que já foram apagados continuam sujeitos à classificação de recuperabilidade abaixo.
+
+## Causa raiz
+
+O único lugar que armazenava o texto era `Opportunity.lostReason`. Esse campo tem semântica de estado atual e o escritor de etapa corretamente o limpava ao sair de uma etapa perdida. `OpportunityStageHistory` preservava que a perda aconteceu, mas não o motivo; os eventos antigos de `OPPORTUNITY_LOST` também continham apenas as etapas de origem e destino. Estado atual e fato histórico estavam, portanto, indevidamente representados pela mesma coluna.
+
+## Modelagem escolhida
+
+A migration `20260907010000_opportunity_stage_history_lost_reason` adiciona `OpportunityStageHistory.lostReason String?`. A linha de histórico de cada entrada em etapa perdida passa a guardar o motivo normalizado daquele evento. O campo é nulo na criação e em qualquer transição não perdida.
+
+Essa é a fonte comercial de verdade: relatórios de perdas devem consultar o histórico unido a `SalesStage.isLost`, e não inferir perdas passadas a partir do estado atual. `AuditLog` recebe uma cópia sanitizada para rastreabilidade, mas não é usado como banco analítico.
+
+`Opportunity.lostReason` permanece com sua semântica anterior e coerente: motivo da perda **atual**. Ele recebe o valor ao perder e é limpo ao reabrir ou ganhar. Limpar o estado atual não altera a linha histórica.
+
+## Writer, validação e auditoria
+
+Toda a regra fica em `applyOpportunityStageChange`, o escritor único introduzido no CRM-FIX-01:
+
+- uma entrada em etapa perdida exige motivo não vazio;
+- o texto recebe `trim` e limite de 500 caracteres;
+- o DTO rejeita payload HTTP maior que 500 e o writer também limita qualquer chamador interno;
+- `additionalData` e `auditMetadata` são aplicados antes dos campos canônicos e não conseguem falsificar `stageId`, `stageEnteredAt`, `lostReason`, `fromStageId` ou `toStageId`;
+- a mesma transação atualiza `Opportunity`, cria `OpportunityStageHistory` e devolve `OPPORTUNITY_STAGE_CHANGED` mais `OPPORTUNITY_LOST`;
+- os dois eventos de perda carregam `fromStageId`, `toStageId` e `lostReason`; `AuditService` aplica a sanitização geral antes de gravá-los;
+- ganho e mudança não terminal não recebem motivo histórico nem metadado de perda;
+- no-op na mesma etapa continua sem atualização, histórico ou auditoria.
+
+Os caminhos automáticos de proposta e venda continuam chamando o mesmo writer. Eles só apontam para etapa ganha e gravam `lostReason = null` no evento novo, sem tocar em nenhuma perda histórica anterior. Locks `FOR UPDATE`, tenancy, idempotência, `stageEnteredAt` e lote transacional de auditoria não mudaram.
+
+## Leitura e interface
+
+`GET /crm/opportunities/:id/history` devolve o novo campo naturalmente pelo Prisma. A timeline inclui o motivo na descrição e usa o título `Oportunidade marcada como perdida`. O detalhe Angular exibe o motivo tanto no histórico de etapas quanto na timeline. Depois de reabertura ou ganho, o resumo deixa de mostrar motivo atual, mas as perdas anteriores permanecem visíveis; duas perdas mostram dois motivos.
+
+## Migration
+
+```sql
+ALTER TABLE "OpportunityStageHistory"
+ADD COLUMN IF NOT EXISTS "lostReason" TEXT;
+```
+
+Ela é pequena, nullable, idempotente e não destrutiva. Não remove nem reescreve linhas e não executa backfill no boot.
+
+## Dados históricos anteriores à correção
+
+### Recuperável com alta confiança
+
+Oportunidades que **ainda estão** numa etapa perdida, mantêm `Opportunity.lostReason` não vazio e cujo último evento de histórico aponta para a mesma etapa. Nesse caso o estado atual e o último evento representam inequivocamente a mesma perda.
+
+Consulta somente leitura para revisar candidatos:
+
+```sql
+SELECT
+  o."organizationId",
+  o."id" AS "opportunityId",
+  h."id" AS "historyId",
+  h."changedAt",
+  o."lostReason"
+FROM "Opportunity" o
+JOIN "SalesStage" s
+  ON s."id" = o."stageId"
+ AND s."organizationId" = o."organizationId"
+ AND s."isLost" = TRUE
+JOIN LATERAL (
+  SELECT hh."id", hh."toStageId", hh."changedAt", hh."lostReason"
+  FROM "OpportunityStageHistory" hh
+  WHERE hh."opportunityId" = o."id"
+    AND hh."organizationId" = o."organizationId"
+  ORDER BY hh."changedAt" DESC, hh."id" DESC
+  LIMIT 1
+) h ON h."toStageId" = o."stageId"
+WHERE NULLIF(BTRIM(o."lostReason"), '') IS NOT NULL
+  AND h."lostReason" IS NULL;
+```
+
+Depois de guardar e revisar o resultado, um reparo manual possível é:
+
+```sql
+WITH candidates AS (
+  SELECT
+    h."id" AS "historyId",
+    LEFT(BTRIM(o."lostReason"), 500) AS "lostReason"
+  FROM "Opportunity" o
+  JOIN "SalesStage" s
+    ON s."id" = o."stageId"
+   AND s."organizationId" = o."organizationId"
+   AND s."isLost" = TRUE
+  JOIN LATERAL (
+    SELECT hh."id", hh."toStageId", hh."changedAt", hh."lostReason"
+    FROM "OpportunityStageHistory" hh
+    WHERE hh."opportunityId" = o."id"
+      AND hh."organizationId" = o."organizationId"
+    ORDER BY hh."changedAt" DESC, hh."id" DESC
+    LIMIT 1
+  ) h ON h."toStageId" = o."stageId"
+  WHERE NULLIF(BTRIM(o."lostReason"), '') IS NOT NULL
+    AND h."lostReason" IS NULL
+)
+UPDATE "OpportunityStageHistory" history
+SET "lostReason" = candidates."lostReason"
+FROM candidates
+WHERE history."id" = candidates."historyId"
+  AND history."lostReason" IS NULL
+RETURNING history."organizationId", history."opportunityId", history."id",
+          history."changedAt", history."lostReason";
+```
+
+Esse comando **não foi executado**. Não é migration nem deve entrar no deploy automático; exige autorização, revisão do `SELECT` e evidência guardada.
+
+### Recuperável parcialmente
+
+- Um `AuditLog` excepcional que já contenha `metadata.lostReason` prova o texto e o evento de perda, mas a associação à linha exata de histórico precisa ser revisada por oportunidade, etapas e proximidade temporal; os eventos gravados pelo código antigo normalmente não contêm esse campo.
+- Um `Opportunity.lostReason` preenchido com histórico ausente ou cujo último evento não corresponde à etapa atual prova que há informação remanescente, mas não permite atribuí-la automaticamente a uma perda específica.
+
+Consulta somente leitura para localizar a primeira categoria:
+
+```sql
+SELECT "organizationId", "entityId" AS "opportunityId", "createdAt",
+       metadata ->> 'fromStageId' AS "fromStageId",
+       metadata ->> 'toStageId' AS "toStageId",
+       metadata ->> 'lostReason' AS "lostReason"
+FROM "AuditLog"
+WHERE action = 'OPPORTUNITY_LOST'
+  AND NULLIF(BTRIM(metadata ->> 'lostReason'), '') IS NOT NULL
+ORDER BY "organizationId", "entityId", "createdAt";
+```
+
+### Irrecuperável
+
+Perdas anteriores que foram reabertas ou posteriormente ganhas, tiveram `Opportunity.lostReason` limpo e não possuem outra fonte inequívoca com o texto. O histórico antigo e o `AuditLog` antigo provam que houve perda, mas não guardam o motivo. Nenhum valor deve ser inferido ou inventado.
+
+## Testes e verificação
+
+Há cobertura para motivo obrigatório; persistência no evento; reabertura; semântica do estado atual; múltiplas perdas; ganho posterior; auditoria; transições sem motivo indevido; no-op; tenancy; proteção contra sobrescrita por dados extras e metadados; trim e limite; proposta e venda; contrato da timeline; e exibição do detalhe com loading/error preservados.
+
+O resultado final das suítes e builds fica registrado em `PROGRESS.md` após a validação completa.

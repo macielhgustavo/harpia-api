@@ -1,3 +1,4 @@
+/* eslint-disable @typescript-eslint/no-unsafe-assignment */
 import { BadRequestException, NotFoundException } from '@nestjs/common';
 import {
   PersonRoleType,
@@ -180,6 +181,7 @@ describe('CrmService', () => {
         fromStageId: 'stage-old',
         toStageId: 'stage-won',
         changedByUserId: 'user-1',
+        lostReason: null,
       },
     });
     expect(audit.recordMany).toHaveBeenCalledWith(
@@ -452,6 +454,179 @@ describe('CrmService', () => {
         where: { opportunityId: 'opportunity-1', organizationId: 'org-a' },
       }),
     );
+  });
+
+  describe('loss reason', () => {
+    const lockOpportunityAt = (stageId: string) =>
+      tx.$queryRaw.mockResolvedValue([
+        {
+          id: 'opportunity-1',
+          personId: 'person-1',
+          pipelineId: 'pipeline-1',
+          stageId,
+          assignedUserId: null,
+          developmentId: null,
+          unitId: null,
+        },
+      ]);
+
+    const stageIs = (id: string, flags: { isWon: boolean; isLost: boolean }) =>
+      tx.salesStage.findFirst.mockResolvedValue({
+        id,
+        pipelineId: 'pipeline-1',
+        ...flags,
+      });
+
+    const historyData = () =>
+      (tx.opportunityStageHistory.create.mock.calls as unknown[][]).map(
+        (call) => (call[0] as { data: Record<string, unknown> }).data,
+      );
+
+    const updatedData = () =>
+      (tx.opportunity.update.mock.calls as unknown[][]).map(
+        (call) => (call[0] as { data: Record<string, unknown> }).data,
+      );
+
+    const auditedEntries = () =>
+      (audit.recordMany.mock.calls as unknown[][]).flatMap(
+        (call) =>
+          call[0] as { action: string; metadata: Record<string, unknown> }[],
+      );
+
+    beforeEach(() => {
+      tx.opportunity.update.mockResolvedValue({ id: 'opportunity-1' });
+      tx.opportunity.findUniqueOrThrow.mockResolvedValue({
+        id: 'opportunity-1',
+      });
+    });
+
+    it('records the reason in the commercial history when losing', async () => {
+      lockOpportunityAt('stage-negotiation');
+      stageIs('stage-lost', { isWon: false, isLost: true });
+
+      await service.moveOpportunity('opportunity-1', actor, {
+        stageId: 'stage-lost',
+        lostReason: 'Preço acima do orçamento',
+      });
+
+      expect(historyData()[0]).toEqual({
+        organizationId: 'org-a',
+        opportunityId: 'opportunity-1',
+        fromStageId: 'stage-negotiation',
+        toStageId: 'stage-lost',
+        changedByUserId: 'user-1',
+        lostReason: 'Preço acima do orçamento',
+      });
+      const entries = auditedEntries();
+      expect(entries.map((entry) => entry.action)).toEqual([
+        AUDIT_ACTIONS.OPPORTUNITY_STAGE_CHANGED,
+        AUDIT_ACTIONS.OPPORTUNITY_LOST,
+      ]);
+      expect(entries[1].metadata).toEqual({
+        fromStageId: 'stage-negotiation',
+        toStageId: 'stage-lost',
+        lostReason: 'Preço acima do orçamento',
+      });
+    });
+
+    it('clears only the current state when the opportunity is reopened', async () => {
+      lockOpportunityAt('stage-lost');
+      stageIs('stage-qualified', { isWon: false, isLost: false });
+
+      await service.moveOpportunity('opportunity-1', actor, {
+        stageId: 'stage-qualified',
+      });
+
+      expect(updatedData()[0].lostReason).toBeNull();
+      // The reopening writes its own row; the losing row is never touched.
+      expect(historyData()[0].lostReason).toBeNull();
+      expect(tx.opportunityStageHistory.create).toHaveBeenCalledTimes(1);
+    });
+
+    it('never writes a loss reason when the opportunity is won', async () => {
+      lockOpportunityAt('stage-negotiation');
+      stageIs('stage-won', { isWon: true, isLost: false });
+
+      await service.moveOpportunity('opportunity-1', actor, {
+        stageId: 'stage-won',
+        lostReason: 'não deveria vazar',
+      });
+
+      expect(historyData()[0].lostReason).toBeNull();
+      expect(updatedData()[0].lostReason).toBeNull();
+      for (const entry of auditedEntries()) {
+        expect(entry.metadata).not.toHaveProperty('lostReason');
+      }
+    });
+
+    it('fails closed before recording a loss for another tenant', async () => {
+      tx.$queryRaw.mockResolvedValue([]);
+
+      await expect(
+        service.moveOpportunity('opportunity-other-tenant', actor, {
+          stageId: 'stage-lost',
+          lostReason: 'Preço',
+        }),
+      ).rejects.toThrow(NotFoundException);
+
+      expect(tx.opportunityStageHistory.create).not.toHaveBeenCalled();
+      expect(audit.recordMany).not.toHaveBeenCalled();
+    });
+
+    it('reads the commercial history only inside the tenant', async () => {
+      prisma.opportunity.findFirst.mockResolvedValue({ id: 'opportunity-1' });
+      prisma.opportunityStageHistory.findMany.mockResolvedValue([]);
+
+      await service.findOpportunityHistory('opportunity-1', 'org-a');
+
+      expect(prisma.opportunityStageHistory.findMany).toHaveBeenCalledWith(
+        expect.objectContaining({
+          where: { opportunityId: 'opportunity-1', organizationId: 'org-a' },
+        }),
+      );
+    });
+
+    it('shows every past loss in the timeline, even after a later win', async () => {
+      prisma.opportunity.findFirst.mockResolvedValue({ id: 'opportunity-1' });
+      prisma.opportunityStageHistory.findMany.mockResolvedValue([
+        {
+          id: 'history-lost',
+          changedAt: new Date('2026-09-01T10:00:00.000Z'),
+          fromStage: { name: 'Qualificado' },
+          toStage: { name: 'Perdido', isLost: true },
+          lostReason: 'Preço acima do orçamento',
+          changedByUser: { id: 'user-1', name: 'Ana' },
+        },
+        {
+          id: 'history-won',
+          changedAt: new Date('2026-09-05T10:00:00.000Z'),
+          fromStage: { name: 'Negociação' },
+          toStage: { name: 'Ganho', isLost: false },
+          lostReason: null,
+          changedByUser: { id: 'user-1', name: 'Ana' },
+        },
+      ]);
+      prisma.salesActivity.findMany.mockResolvedValue([]);
+      prisma.salesVisit.findMany.mockResolvedValue([]);
+      prisma.unitReservation.findMany.mockResolvedValue([]);
+      prisma.salesProposal.findMany.mockResolvedValue([]);
+      prisma.sale.findMany.mockResolvedValue([]);
+
+      const timeline = await service.findOpportunityTimeline(
+        'opportunity-1',
+        'org-a',
+      );
+
+      const lost = timeline.find((item) => item.id === 'stage:history-lost')!;
+      expect(lost.title).toBe('Oportunidade marcada como perdida');
+      expect(lost.description).toBe(
+        'Movida de Qualificado para Perdido. Motivo: Preço acima do orçamento',
+      );
+
+      const won = timeline.find((item) => item.id === 'stage:history-won')!;
+      expect(won.title).toBe('Etapa alterada para Ganho');
+      expect(won.description).toBe('Movida de Negociação para Ganho.');
+    });
   });
 });
 

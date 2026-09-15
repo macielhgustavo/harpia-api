@@ -11,7 +11,7 @@ Antes de executar qualquer item, comparar com `docs/crm.md`, `docs/crm-master-au
 - **PENDENTE** — não existe.
 - **BLOQUEADO** — depende de outro item ou de decisão externa.
 
-Estados verificados no código em 2026-09-07 (backend `43401f5`, frontend `82e7904`).
+Estados verificados no código em 2026-09-15 (bases backend `46eface`, frontend `8076f21`).
 
 # Fase A — Re-auditoria
 
@@ -103,7 +103,7 @@ Nenhuma regra cria follow-up após visita.
 ## CRM-020 — Lead sources — **PENDENTE** (`source` é `String?` livre)
 ## CRM-021 — UTMs — **PENDENTE**
 ## CRM-022 — Tags — **PENDENTE**
-## CRM-023 — Motivos de perda — **PENDENTE** (`lostReason` é `String?` livre e é apagado na reabertura — BUG-06)
+## CRM-023 — Motivos de perda — **PENDENTE** (`lostReason` continua texto livre; a preservação histórica foi resolvida no CRM-FIX-06, mas o catálogo tenant-scoped ainda não existe)
 ## CRM-024 — Relatório de perdas — **PENDENTE**
 
 # Fase G — Inteligência comercial
@@ -178,7 +178,10 @@ Resolvido em 2026-09-06 nos dois repositórios. Criado `GET /crm/board`, que dev
 Resolvido em 2026-09-07, apenas no frontend. O backend já cobria todo o ciclo: `GET|POST /crm/visits` e `PATCH /crm/visits/:id` foram conferidos item a item antes de qualquer alteração e nenhuma lacuna real de contrato foi encontrada — nenhuma migration, DTO ou regra de domínio foi tocada. Criado `VisitsSectionComponent`, componente próprio no padrão de reservas e propostas, com loading, erro, retry e empty state independentes: uma falha ao listar visitas não derruba o resto do detalhe. A seção separa `Próximas visitas` (status `AGENDADA`, mais cedo primeiro, único bloco com ações) de `Histórico` (demais status, mais recente primeiro), e informa o excedente quando o total passa da página de 100. Agendar, reagendar, marcar como realizada com `outcome` estruturado, registrar não comparecimento e cancelar com motivo acontecem dentro da oportunidade. O reagendamento é `PATCH` na mesma visita, preservando id, tenant, oportunidade, criador e auditoria. A ação rápida `Agendar visita` foi ao cabeçalho do detalhe. Criado `opportunity-detail.component.spec.ts`, primeiro teste de componente do detalhe, com 29 casos. Suíte do frontend com 501 testes passando e build limpo. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
 
 **Ressalvas:** o reagendamento não altera empreendimento nem unidade, porque `UpdateSalesVisitDto` não aceita esses campos; o backend não possui máquina de estados de visita, então a restrição de agir só sobre visitas `AGENDADA` é convenção de UI e não invariante de domínio; `GET /crm/visits` segue sem ordenação e sem filtro por empreendimento (CRM-012).
-## CRM-FIX-06 — Preservar motivo de perda no histórico — **PENDENTE (MÉDIA)**
+## CRM-FIX-06 — Preservar motivo de perda no histórico — **CONCLUÍDO**
+Resolvido em 2026-09-15 nos dois repositórios. `OpportunityStageHistory.lostReason` é agora a fonte de verdade de cada evento de perda, enquanto `Opportunity.lostReason` continua representando somente o estado atual e pode ser limpo na reabertura. O writer único exige, normaliza e limita o motivo, grava estado e histórico na mesma transação e inclui uma cópia sanitizada na auditoria. A timeline e o histórico do detalhe mostram as perdas anteriores mesmo depois de reabertura ou ganho. Migration aditiva `20260907010000_opportunity_stage_history_lost_reason`, sem backfill automático. A análise de recuperabilidade e as consultas manuais estão em `docs/crm-master-audit.md`.
+
+**Ressalva:** motivos já apagados antes da correção são irrecuperáveis quando nenhuma outra fonte preservou o texto. O CRM-023 (catálogo estruturado) e o CRM-024 (relatório de perdas) continuam pendentes.
 ## CRM-FIX-07 — Resolver `SalesVisit.companyId` (usar ou remover) — **PENDENTE (BAIXA)**
 ## CRM-FIX-08 — Paginar timeline e histórico — **PENDENTE (BAIXA)**
 ## CRM-FIX-09 — Consertar `npm run test:e2e` — **PENDENTE (BAIXA)**

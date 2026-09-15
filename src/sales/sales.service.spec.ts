@@ -386,6 +386,8 @@ describe('SalesService', () => {
         }),
       }),
     );
+    // Winning through a sale never carries a loss reason into the commercial
+    // history, and never erases the reason of a past loss.
     expect(tx.opportunityStageHistory.create).toHaveBeenCalledWith({
       data: {
         organizationId: 'org-a',
@@ -393,6 +395,7 @@ describe('SalesService', () => {
         fromStageId: 'stage-negotiation',
         toStageId: 'stage-won',
         changedByUserId: 'user-1',
+        lostReason: null,
       },
     });
     expect(audit.recordMany).toHaveBeenCalledWith(

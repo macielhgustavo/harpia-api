@@ -4,14 +4,14 @@ O CRM é isolado por organização em todas as tabelas e consultas. Nenhum endpo
 
 Em produção, migrations pendentes são aplicadas pela própria inicialização da API antes de o serviço começar a aceitar requisições (`src/database/run-production-migrations.ts`, chamado por `src/main.ts`). A recuperação automática é limitada à migration idempotente `20260904040000_sales_visits`, caso um deploy anterior tenha deixado somente ela marcada como falha (P3009).
 
-Última verificação contra o código: 2026-09-07 (backend `43401f5`, frontend `82e7904`).
+Última verificação contra o código: 2026-09-15 (bases backend `46eface`, frontend `8076f21`).
 
 ## Modelo
 
 - `SalesPipeline`: funil comercial configurável. O primeiro acesso cria, sob lock transacional, o pipeline padrão da organização.
 - `SalesStage`: etapa ordenada do funil, com `defaultProbability` (`Int`, CHECK 0–100). Cada pipeline possui exatamente uma etapa ganha e uma perdida.
 - `Opportunity`: oportunidade ligada a uma pessoa e, opcionalmente, a responsável, empreendimento e unidade.
-- `OpportunityStageHistory`: histórico comercial imutável das movimentações de etapa, incluindo a etapa inicial.
+- `OpportunityStageHistory`: histórico comercial imutável das movimentações de etapa, incluindo a etapa inicial. Entradas em etapa perdida preservam o `lostReason` daquele evento.
 - `SalesActivity`: atividade ligada à oportunidade e à sua pessoa, com status, prioridade, lembrete e resultado.
 - `SalesVisit`: visita imobiliária estruturada, ligada à oportunidade, pessoa, responsável, empreendimento e unidade, com agenda, duração, comparecimento e resultado.
 
@@ -31,7 +31,7 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 - Uma oportunidade não pode nascer numa etapa terminal.
 - A unidade precisa pertencer ao empreendimento indicado; quando apenas a unidade é informada, o empreendimento é derivado dela.
 - Responsáveis precisam ser usuários ativos da mesma organização.
-- Mover para Perdido exige motivo; Ganho e Perdido geram eventos de auditoria próprios.
+- Mover para Perdido exige motivo não vazio, normalizado com `trim` e limitado a 500 caracteres; Ganho e Perdido geram eventos de auditoria próprios.
 - Toda mudança de etapa passa por `applyOpportunityStageChange` (`src/crm/opportunity-stage.ts`), o escritor único de `Opportunity.stageId`. Ele grava `stageEnteredAt`, cria o registro em `OpportunityStageHistory` e devolve os eventos de auditoria, de modo que os três invariantes não podem divergir. Isso vale para a movimentação manual, para o aceite de proposta e para a conversão em venda.
 - A função é um no-op quando a oportunidade já está na etapa de destino: não grava histórico, não reemite auditoria e não recarimba `stageEnteredAt`.
 - O chamador continua responsável por abrir a transação, aplicar o lock `FOR UPDATE` tenant-scoped na oportunidade e persistir os eventos retornados.
@@ -40,7 +40,17 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 - A listagem de atividades aceita filtros por oportunidade, pessoa, responsável, tipo, status, prioridade, intervalo de agendamento e `openOnly`, sempre no tenant da sessão. O predicado é montado num único lugar, `buildSalesActivityWhere` (`src/crm/sales-activity-filters.ts`), de modo que nenhum filtro dependa da ordem de spread nem sobrescreva outro.
 - Visitas começam agendadas; realização, ausência ou cancelamento preservam o marco temporal enquanto o status permanecer naquela classe. Cancelamento exige motivo e `outcome` estruturado só pode ser informado para visita realizada.
 - `estimatedValue` é recebido como string decimal canônica e armazenado como `Decimal(18,2)`. A API nunca usa ponto flutuante para dinheiro comercial novo.
-- O histórico de etapa atende à operação comercial. O `AuditLog` append-only registra autoria e mutações para rastreabilidade.
+- O histórico de etapa atende à operação comercial e é a fonte de verdade para motivos de perdas passadas. O `AuditLog` append-only registra autoria e mutações para rastreabilidade, mas não é a fonte analítica do CRM.
+
+### Semântica do motivo de perda
+
+`Opportunity.lostReason` representa somente o estado atual: recebe o motivo ao entrar em uma etapa `isLost` e volta a `null` ao sair dela. A informação histórica fica na linha criada para aquela transição em `OpportunityStageHistory.lostReason`.
+
+Cada perda é um evento separado. Portanto, perder, reabrir e perder novamente cria duas linhas com dois motivos independentes; reabrir ou ganhar depois não atualiza nem apaga nenhuma delas. Movimentos para etapas não perdidas gravam `lostReason = null` no próprio evento e não carregam motivo na auditoria.
+
+`applyOpportunityStageChange` normaliza e limita o texto, exige o motivo quando o destino é perdido, grava estado atual e histórico na mesma transação e inclui o valor canônico nos metadados de `OPPORTUNITY_STAGE_CHANGED` e `OPPORTUNITY_LOST`. `AuditService` aplica ainda a sanitização geral dos metadados antes da persistência.
+
+`GET /crm/opportunities/:id/history` expõe `lostReason` em cada entrada. A timeline identifica a entrada em etapa perdida como `Oportunidade marcada como perdida` e inclui `Motivo: ...` na descrição. Relatórios futuros de perda devem consultar `OpportunityStageHistory` e a etapa de destino, não `Opportunity.lostReason`.
 
 ## Limitações conhecidas do modelo atual
 
@@ -48,7 +58,7 @@ Estes pontos são reais e verificados no código. Não devem ser descritos como 
 
 - **Oportunidades ganhas entre 2026-09-04 e 2026-09-06 podem ter `stageEnteredAt` defasado.** O defeito que permitia isso foi corrigido (ver CRM-FIX-01), mas os registros já gravados no período só são reparados por um backfill autorizado. O procedimento está documentado em `docs/crm-master-audit.md`.
 - **Timeline e histórico não são paginados.** `findOpportunityTimeline` executa seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
-- **`lostReason` é apagado ao sair da etapa perdida** e não é replicado nos metadados de auditoria, tornando o motivo irrecuperável.
+- **Perdas anteriores à migration `20260907010000_opportunity_stage_history_lost_reason` podem ter `OpportunityStageHistory.lostReason = null`.** O motivo da perda atual é recuperável com alta confiança quando a oportunidade ainda está em etapa perdida; perdas antigas já reabertas podem ser irrecuperáveis. A classificação e a consulta de recuperação estão em `docs/crm-master-audit.md`; nenhum backfill foi executado.
 - **`SalesVisit.companyId` existe no schema e no banco mas não é usado** por nenhum service, DTO ou include. Foi introduzido pela migration `20260905010000_sales_visits_company_scope` para reconciliar drift do Prisma.
 - **`reminderAt` é armazenado mas nunca processado.** O CRM não consome o módulo de notificações; não existe worker de lembretes.
 - **Não existem endpoints de edição, exclusão ou reordenação de pipelines e etapas.** Só há `GET` e `POST /crm/pipelines`.
