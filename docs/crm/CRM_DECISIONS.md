@@ -90,6 +90,11 @@ Novas frentes grandes fora do CRM exigem justificativa forte até o CRM atingir 
 
 `Opportunity.lostReason` representa o estado atual. Cada entrada em etapa perdida preserva seu próprio motivo imutável em `OpportunityStageHistory.lostReason`, que é a fonte de verdade para timeline e relatórios. `AuditLog` recebe uma cópia sanitizada para rastreabilidade, mas não substitui o histórico comercial.
 
+## ADR-019 — Empresa da visita é derivada do empreendimento
+**Status:** APROVADO
+
+`SalesVisit` não possui `companyId`. Quando a visita tem empreendimento, a empresa/SPE é obtida pela relação já autoritativa `SalesVisit.developmentId → Development.companyId`; quando tem unidade, o backend garante que ela pertence ao mesmo empreendimento. Duplicar a empresa na visita criaria duas fontes mutáveis e permitiria combinações inconsistentes. Visita sem empreendimento não recebe empresa artificial.
+
 # Template
 
 ## ADR-XXX — Título

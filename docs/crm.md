@@ -4,7 +4,7 @@ O CRM é isolado por organização em todas as tabelas e consultas. Nenhum endpo
 
 Em produção, migrations pendentes são aplicadas pela própria inicialização da API antes de o serviço começar a aceitar requisições (`src/database/run-production-migrations.ts`, chamado por `src/main.ts`). A recuperação automática é limitada à migration idempotente `20260904040000_sales_visits`, caso um deploy anterior tenha deixado somente ela marcada como falha (P3009).
 
-Última verificação contra o código: 2026-09-15 (bases backend `46eface`, frontend `8076f21`).
+Última verificação contra o código: 2026-09-15 (bases backend `3b345fa`, frontend `6ddc233`).
 
 ## Modelo
 
@@ -39,6 +39,7 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 - Atividades possuem ciclo explícito e prioridade. Ao concluir sem informar horário, o backend registra a conclusão; estados não concluídos não mantêm `completedAt`.
 - A listagem de atividades aceita filtros por oportunidade, pessoa, responsável, tipo, status, prioridade, intervalo de agendamento e `openOnly`, sempre no tenant da sessão. O predicado é montado num único lugar, `buildSalesActivityWhere` (`src/crm/sales-activity-filters.ts`), de modo que nenhum filtro dependa da ordem de spread nem sobrescreva outro.
 - Visitas começam agendadas; realização, ausência ou cancelamento preservam o marco temporal enquanto o status permanecer naquela classe. Cancelamento exige motivo e `outcome` estruturado só pode ser informado para visita realizada.
+- A empresa/SPE de uma visita não é armazenada diretamente. Quando houver empreendimento, ela é derivada por `SalesVisit.developmentId → Development.companyId`; quando houver unidade, `resolveLocation` garante que ela pertence ao mesmo empreendimento. Visitas sem empreendimento também não possuem empresa inferível.
 - `estimatedValue` é recebido como string decimal canônica e armazenado como `Decimal(18,2)`. A API nunca usa ponto flutuante para dinheiro comercial novo.
 - O histórico de etapa atende à operação comercial e é a fonte de verdade para motivos de perdas passadas. O `AuditLog` append-only registra autoria e mutações para rastreabilidade, mas não é a fonte analítica do CRM.
 
@@ -59,7 +60,6 @@ Estes pontos são reais e verificados no código. Não devem ser descritos como 
 - **Oportunidades ganhas entre 2026-09-04 e 2026-09-06 podem ter `stageEnteredAt` defasado.** O defeito que permitia isso foi corrigido (ver CRM-FIX-01), mas os registros já gravados no período só são reparados por um backfill autorizado. O procedimento está documentado em `docs/crm-master-audit.md`.
 - **Timeline e histórico não são paginados.** `findOpportunityTimeline` executa seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
 - **Perdas anteriores à migration `20260907010000_opportunity_stage_history_lost_reason` podem ter `OpportunityStageHistory.lostReason = null`.** O motivo da perda atual é recuperável com alta confiança quando a oportunidade ainda está em etapa perdida; perdas antigas já reabertas podem ser irrecuperáveis. A classificação e a consulta de recuperação estão em `docs/crm-master-audit.md`; nenhum backfill foi executado.
-- **`SalesVisit.companyId` existe no schema e no banco mas não é usado** por nenhum service, DTO ou include. Foi introduzido pela migration `20260905010000_sales_visits_company_scope` para reconciliar drift do Prisma.
 - **`reminderAt` é armazenado mas nunca processado.** O CRM não consome o módulo de notificações; não existe worker de lembretes.
 - **Não existem endpoints de edição, exclusão ou reordenação de pipelines e etapas.** Só há `GET` e `POST /crm/pipelines`.
 - **Origem (`source`) e motivo de perda (`lostReason`) são texto livre.** Não existem catálogos tenant-scoped.

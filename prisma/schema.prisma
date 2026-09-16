@@ -243,7 +243,6 @@ model Company {
   costCenters           CostCenter[]
   payables              Payable[]
   financialTransactions FinancialTransaction[]
-  salesVisits           SalesVisit[]
   statementEntries      BankStatementEntry[]
 }
 
@@ -515,8 +514,6 @@ model SalesVisit {
   cancellationReason String?
   createdAt          DateTime           @default(now())
   updatedAt          DateTime           @updatedAt
-  company            Company?           @relation(fields: [companyId], references: [id], onDelete: SetNull)
-  companyId          String?
 
   @@index([organizationId, scheduledAt])
   @@index([organizationId, status, scheduledAt])

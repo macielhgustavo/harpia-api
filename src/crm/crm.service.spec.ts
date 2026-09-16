@@ -5,6 +5,7 @@ import {
   SalesActivityPriority,
   SalesActivityStatus,
   SalesActivityType,
+  SalesVisitStatus,
 } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
@@ -435,7 +436,20 @@ describe('CrmService', () => {
         assignedUser: { id: 'user-1', name: 'Ana' },
       },
     ]);
-    prisma.salesVisit.findMany.mockResolvedValue([]);
+    prisma.salesVisit.findMany.mockResolvedValue([
+      {
+        id: 'visit-1',
+        scheduledAt: new Date('2026-09-03T10:00:00.000Z'),
+        completedAt: null,
+        cancelledAt: null,
+        status: SalesVisitStatus.AGENDADA,
+        result: null,
+        notes: 'Conhecer o decorado',
+        location: null,
+        assignedUser: { id: 'user-1', name: 'Ana' },
+        unit: { identifier: '305' },
+      },
+    ]);
     prisma.unitReservation.findMany.mockResolvedValue([]);
     prisma.salesProposal.findMany.mockResolvedValue([]);
     prisma.sale.findMany.mockResolvedValue([]);
@@ -446,9 +460,24 @@ describe('CrmService', () => {
     );
 
     expect(timeline.map((item) => item.id)).toEqual([
+      'visit:visit-1',
       'activity:activity-1',
       'stage:history-1',
     ]);
+    expect(timeline[0]).toEqual(
+      expect.objectContaining({
+        title: 'Visita à unidade 305',
+        description: 'Conhecer o decorado',
+        status: SalesVisitStatus.AGENDADA,
+      }),
+    );
+    expect(prisma.salesVisit.findMany).toHaveBeenCalledWith({
+      where: { opportunityId: 'opportunity-1', organizationId: 'org-a' },
+      include: {
+        assignedUser: { select: { id: true, name: true } },
+        unit: { select: { identifier: true } },
+      },
+    });
     expect(prisma.unitReservation.findMany).toHaveBeenCalledWith(
       expect.objectContaining({
         where: { opportunityId: 'opportunity-1', organizationId: 'org-a' },

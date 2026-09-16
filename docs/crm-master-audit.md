@@ -149,7 +149,7 @@ A fase D (visitas), listada como pendente na auditoria anterior, foi parcialment
 - **BUG-04 (MÉDIA) — `openOnly` sobrescreve `status`.** *(CORRIGIDO em 2026-09-06 por CRM-FIX-02 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* Em `CrmService.findActivities`, o spread de `openOnly` vem depois do de `status`; `?status=CONCLUIDA&openOnly=true` devolve pendentes e em andamento em vez de conjunto vazio.
 - **BUG-05 (MÉDIA) — visitas desconectadas do detalhe da oportunidade.** *(CORRIGIDO em 2026-09-07 por CRM-FIX-05 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `opportunity-detail.component.html` não possui seção de visitas; elas aparecem apenas como linhas da timeline. Não é possível agendar visita, registrar comparecimento ou ver as visitas da oportunidade a partir do detalhe.
 - **BUG-06 (MÉDIA) — `lostReason` é destruído.** *(CORRIGIDO em 2026-09-15 por CRM-FIX-06 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* `crm.service.ts:487` grava `lostReason: null` ao mover para qualquer etapa não perdida, e os metadados de `OPPORTUNITY_LOST` não guardam o texto. O motivo da perda torna-se irrecuperável após reabertura, contrariando a diretriz de preservar histórico comercial.
-- **BUG-07 (BAIXA) — `SalesVisit.companyId` é schema morto.** A coluna e a FK existem no banco (migration `20260905010000_sales_visits_company_scope`) e no schema, mas nenhum service, DTO ou include a escreve ou lê.
+- **BUG-07 (BAIXA) — `SalesVisit.companyId` é schema morto.** *(CORRIGIDO em 2026-09-15 por CRM-FIX-07 — ver seção no fim deste documento. O texto abaixo descreve o defeito como encontrado.)* A coluna e a FK existem no banco (migration `20260905010000_sales_visits_company_scope`) e no schema, mas nenhum service, DTO ou include a escreve ou lê.
 - **BUG-08 (BAIXA) — timeline e histórico sem limite.** `findOpportunityTimeline` dispara seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
 - **BUG-09 (BAIXA) — `result` livre em visita cancelada.** Em `visits.service.ts`, `outcome` é zerado fora de `REALIZADA`, mas `result` não é validado nem limpo.
 - **BUG-10 (BAIXA) — `npm run test:e2e` quebrado.** O script aponta para `./test/jest-e2e.json` e o diretório `test/` não existe no repositório.
@@ -763,3 +763,87 @@ Perdas anteriores que foram reabertas ou posteriormente ganhas, tiveram `Opportu
 Há cobertura para motivo obrigatório; persistência no evento; reabertura; semântica do estado atual; múltiplas perdas; ganho posterior; auditoria; transições sem motivo indevido; no-op; tenancy; proteção contra sobrescrita por dados extras e metadados; trim e limite; proposta e venda; contrato da timeline; e exibição do detalhe com loading/error preservados.
 
 O resultado final das suítes e builds fica registrado em `PROGRESS.md` após a validação completa.
+
+---
+
+# CRM-FIX-07 — Resolução do BUG-07
+
+Data: 2026-09-15
+
+## Situação
+
+**CORRIGIDO no código.** O texto original do BUG-07 permanece preservado na re-auditoria acima. A correção remove somente a relação morta; nenhuma linha de visita, evento de timeline ou registro de auditoria é apagado.
+
+## Origem e causa raiz
+
+O commit `e9d9473` criou `SalesVisit` e incluiu `companyId` apenas no schema Prisma. A migration original `20260904040000_sales_visits` não criou a coluna, e DTOs, service, includes, filtros, seed, relatórios, SQL, auditoria e frontend nunca passaram a ler ou escrever esse campo. O commit seguinte, `cfcca47`, criou `20260905010000_sales_visits_company_scope` apenas para reconciliar essa divergência entre schema e banco; não acrescentou nenhuma regra de negócio ou consumidor.
+
+Assim, `SalesVisit.companyId` não representava escopo de tenant — esse papel sempre foi de `organizationId` — nem um snapshot histórico. Era uma FK opcional permanentemente nula nos fluxos da aplicação.
+
+## Decisão de modelagem
+
+A relação foi removida. `Development` continua sendo a autoridade da empresa/SPE conforme a ADR-003:
+
+```text
+SalesVisit.developmentId
+→ Development.companyId
+→ Company
+```
+
+Quando existe `unitId`, `VisitsService.resolveLocation` valida a unidade dentro do tenant, deriva seu `developmentId` e rejeita um par divergente. Portanto, a mesma cadeia cobre visita com unidade sem duplicar empresa. Uma visita sem empreendimento pode existir e, coerentemente, não possui empresa inferível.
+
+Manter ambas as FKs permitiria representar, por exemplo, uma visita na unidade de um empreendimento da SPE A com `companyId` da SPE B. Como nenhum writer sincronizava os campos, formalizar a coluna exigiria inventar uma segunda fonte sem requisito funcional.
+
+## Migration
+
+`20260915010000_remove_sales_visit_company_relation`:
+
+1. verifica se existe algum `SalesVisit.companyId` não nulo e aborta com mensagem explícita se encontrar;
+2. remove `SalesVisit_companyId_fkey` com `IF EXISTS`;
+3. remove a coluna com `IF EXISTS`.
+
+Não havia índice de `SalesVisit` envolvendo `companyId`, logo nenhum índice precisava ser removido. A migration não atualiza, recria nem exclui visitas e não executa backfill. O guard transforma qualquer dado inesperado em bloqueio visível em vez de perda silenciosa.
+
+## Análise dos dados existentes
+
+Não há `.env` funcional nem `DATABASE_URL` no processo desta workspace; existe apenas `.env.example` com placeholder. Portanto, não havia banco local/de teste inequivocamente configurado para consultar. Nenhuma conexão de produção foi feita e a migration não foi executada nesta tarefa.
+
+Antes do deploy, a consulta somente leitura abaixo deve ser executada no ambiente alvo e seu resultado guardado:
+
+```sql
+SELECT
+  v."organizationId",
+  v."id" AS "visitId",
+  v."companyId" AS "visitCompanyId",
+  v."developmentId",
+  d."companyId" AS "developmentCompanyId",
+  v."unitId",
+  u."developmentId" AS "unitDevelopmentId",
+  ud."companyId" AS "unitDevelopmentCompanyId"
+FROM "SalesVisit" v
+LEFT JOIN "Development" d
+  ON d."id" = v."developmentId"
+ AND d."organizationId" = v."organizationId"
+LEFT JOIN "Unit" u
+  ON u."id" = v."unitId"
+ AND u."organizationId" = v."organizationId"
+LEFT JOIN "Development" ud
+  ON ud."id" = u."developmentId"
+ AND ud."organizationId" = v."organizationId"
+WHERE v."companyId" IS NOT NULL
+ORDER BY v."organizationId", v."id";
+```
+
+Interpretação:
+
+- resultado vazio: cenário esperado pelo código; a migration pode remover a coluna sem perder valor;
+- valor igual a `developmentCompanyId`/`unitDevelopmentCompanyId`: dado redundante, recuperável pela relação autoritativa mesmo após a remoção;
+- valor em visita sem empreendimento ou divergente das relações derivadas: dado de origem externa e sem semântica definida no produto. Não deve ser descartado nem corrigido automaticamente; o guard interrompe a migration para análise e autorização manual.
+
+Não foi criado backfill porque o campo removido não alimenta nenhum domínio. Também não se copia o valor para `Development`: isso inverteria a autoridade da relação e poderia alterar outras visitas, oportunidades e fluxos financeiros.
+
+## Compatibilidade e testes
+
+Criação, listagem, edição/reagendamento, visita realizada, ausência, cancelamento, timeline, auditoria, tenancy, empreendimento opcional e unidade opcional continuam usando os mesmos contratos. Os testes de `VisitsService` passaram a cobrir explicitamente oportunidades com e sem empreendimento, visitas com e sem unidade, derivação do empreendimento pela unidade, isolamento por tenant, escrita e leitura sem predicado/include de empresa, criação auditada e edição auditada. A timeline ganhou uma visita real no teste de agregação tenant-scoped.
+
+O frontend já não possuía `companyId` em `SalesVisit`, filtros ou payloads. Nenhum arquivo do `harpia-web` precisou mudar.
