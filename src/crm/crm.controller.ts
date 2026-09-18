@@ -19,6 +19,8 @@ import { CreateSalesPipelineDto } from './dto/create-sales-pipeline.dto';
 import { ListOpportunitiesQueryDto } from './dto/list-opportunities-query.dto';
 import { ListSalesActivitiesQueryDto } from './dto/list-sales-activities-query.dto';
 import { MoveOpportunityDto } from './dto/move-opportunity.dto';
+import { OpportunityHistoryQueryDto } from './dto/opportunity-history-query.dto';
+import { OpportunityTimelineQueryDto } from './dto/opportunity-timeline-query.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 import { UpdateSalesActivityDto } from './dto/update-sales-activity.dto';
 
@@ -63,16 +65,18 @@ export class CrmController {
   findOpportunityHistory(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
+    @Query() query: OpportunityHistoryQueryDto,
   ) {
-    return this.crm.findOpportunityHistory(id, user.organizationId);
+    return this.crm.findOpportunityHistory(id, user.organizationId, query);
   }
 
   @Get('opportunities/:id/timeline')
   findOpportunityTimeline(
     @Param('id') id: string,
     @CurrentUser() user: AuthUser,
+    @Query() query: OpportunityTimelineQueryDto,
   ) {
-    return this.crm.findOpportunityTimeline(id, user.organizationId);
+    return this.crm.findOpportunityTimeline(id, user.organizationId, query);
   }
 
   @Get('opportunities/:id')

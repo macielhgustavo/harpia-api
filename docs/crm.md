@@ -58,7 +58,7 @@ Cada perda é um evento separado. Portanto, perder, reabrir e perder novamente c
 Estes pontos são reais e verificados no código. Não devem ser descritos como resolvidos até que exista correção.
 
 - **Oportunidades ganhas entre 2026-09-04 e 2026-09-06 podem ter `stageEnteredAt` defasado.** O defeito que permitia isso foi corrigido (ver CRM-FIX-01), mas os registros já gravados no período só são reparados por um backfill autorizado. O procedimento está documentado em `docs/crm-master-audit.md`.
-- **Timeline e histórico não são paginados.** `findOpportunityTimeline` executa seis consultas sem `take` e ordena em memória; `findOpportunityHistory` também não limita resultados.
+- **Timestamps efetivos podem mudar.** O cursor da timeline estabiliza inserções novas entre páginas, mas alterações de estado que recarimbem eventos antigos (por exemplo, concluir uma atividade) podem movê-los através da fronteira do cursor durante uma sessão de leitura. A timeline é uma projeção do estado atual, não um log imutável de cada mutação.
 - **Perdas anteriores à migration `20260907010000_opportunity_stage_history_lost_reason` podem ter `OpportunityStageHistory.lostReason = null`.** O motivo da perda atual é recuperável com alta confiança quando a oportunidade ainda está em etapa perdida; perdas antigas já reabertas podem ser irrecuperáveis. A classificação e a consulta de recuperação estão em `docs/crm-master-audit.md`; nenhum backfill foi executado.
 - **`reminderAt` é armazenado mas nunca processado.** O CRM não consome o módulo de notificações; não existe worker de lembretes.
 - **Não existem endpoints de edição, exclusão ou reordenação de pipelines e etapas.** Só há `GET` e `POST /crm/pipelines`.
@@ -73,12 +73,15 @@ Leitura exige `CRM_READ`; mutações exigem `CRM_WRITE`. O guard é global e fai
 - `GET|POST /crm/opportunities`
 - `GET|PATCH|DELETE /crm/opportunities/:id`
 - `POST /crm/opportunities/:id/move`
-- `GET /crm/opportunities/:id/history`
-- `GET /crm/opportunities/:id/timeline`
+- `GET /crm/opportunities/:id/history?page=1&pageSize=20` — `{ data, pagination: { page, pageSize, total, totalPages } }`, máximo 100; ordenação `changedAt DESC, id DESC`.
+- `GET /crm/opportunities/:id/timeline?limit=20&cursor=...` — `{ data, nextCursor }`, máximo 100; `nextCursor = null` ao terminar. O cursor opaco é vinculado à oportunidade e representa o último par `(occurredAt, id)` recebido.
+
 - `GET|POST /crm/activities`
 - `PATCH|DELETE /crm/activities/:id`
 - `GET|POST /crm/visits`
 - `PATCH /crm/visits/:id`
+
+A timeline seleciona as chaves das seis fontes em um único `UNION ALL` parametrizado, ordena o conjunto completo por `occurredAt DESC, id ASC` e limita a `limit + 1`; só então hidrata, em consultas paralelas, os registros da página. `id` recebe prefixo estável por fonte (`stage`, `activity`, `visit`, `reservation`, `proposal`, `sale`), garantindo desempate entre tabelas. `occurredAt` conserva exatamente a regra anterior de cada fonte: etapa `changedAt`; atividade `completedAt ?? createdAt`; visita `completedAt ?? cancelledAt ?? scheduledAt`; reserva `convertedAt ?? cancelledAt ?? createdAt`; proposta `convertedToSaleAt ?? acceptedAt ?? rejectedAt ?? sentAt ?? createdAt`; venda `saleDate`. Um evento novo acima do cursor não desloca eventos antigos; o detalhe mescla os eventos recentes por ID e mantém o cursor mais antigo ao atualizar. As consultas permanecem tenant-scoped pelo usuário autenticado e exigem `CRM_READ`.
 
 As listagens de oportunidades, atividades e visitas são paginadas no servidor, com limite de 100 registros por página. Não existe `GET /crm/visits/:id`.
 
@@ -242,4 +245,4 @@ Nenhuma lista do CRM é apresentada como completa quando não é.
 - **`/crm/tasks`**: 20 atividades por página, com `Carregar mais` por visão. Os badges continuam vindo de `pagination.total`.
 - **`/crm/visits`**: o seletor de oportunidade passou a ser busca no servidor com *debounce* de 300 ms, cobrindo qualquer oportunidade do tenant. A quantidade não exibida é informada.
 
-Limites que permanecem, por serem por oportunidade e não por tenant: atividades, visitas, reservas e propostas dentro do detalhe da oportunidade carregam até 100 registros cada — a seção de visitas informa quantas não está mostrando quando o total excede a página — e a timeline segue sem paginação.
+Limites que permanecem, por serem por oportunidade e não por tenant: atividades, visitas, reservas e propostas dentro do detalhe da oportunidade carregam até 100 registros cada — a seção de visitas informa quantas não está mostrando quando o total excede a página. Histórico e timeline começam com 20 eventos e oferecem carregamento incremental.

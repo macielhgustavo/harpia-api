@@ -59,7 +59,7 @@ As sete ações do `CRM_UX.md` existem no detalhe: registrar contato e criar tar
 
 ## CRM-006 — Timeline unificada — **PARCIAL**
 Unificação feita no backend (`GET /crm/opportunities/:id/timeline` agrega etapas, atividades, visitas, reservas, propostas e vendas) e renderizada no detalhe.
-Falta: **paginação** — as seis consultas não têm limite (BUG-08).
+Paginação concluída em CRM-FIX-08: cursor na timeline unificada e carregamento incremental no detalhe. Permanecem fora do escopo a visão de atividades concluídas em `/crm/tasks` e reminders efetivos.
 
 ## CRM-007 — Follow-up profissional — **CONCLUÍDO**
 `SalesActivity` possui título (`summary`), descrição (`notes`), responsável, data/hora, status, prioridade, `reminderAt` e `result`, com DTOs, filtros e formulário no frontend.
@@ -149,7 +149,7 @@ Existe motor de automação apenas para cobrança (`collections-automation.servi
 ## CRM-047 — Mobile — **PARCIAL** (layouts responsivos existem; funil e lista dependem de scroll horizontal)
 ## CRM-048 — Busca global — **PENDENTE**
 ## CRM-049 — Empty states — **PARCIAL** (existem em todas as telas de CRM; só a seção de visitas do detalhe tem CTA de ação)
-## CRM-050 — Performance — **PARCIAL** (paginação no servidor existe; timeline e histórico são ilimitados)
+## CRM-050 — Performance — **PARCIAL** (paginação no servidor cobre timeline e histórico; outros blocos do detalhe continuam limitados a 100 por lista)
 ## CRM-051 — Observabilidade — **PENDENTE**
 ## CRM-052 — E2E completo — **PENDENTE** (`npm run test:e2e` aponta para um diretório inexistente. Testes de componente já existem para `/crm`, `/crm/tasks`, `/crm/visits` e o detalhe da oportunidade; não há E2E de ponta a ponta)
 
@@ -173,7 +173,7 @@ Resolvido em 2026-09-06, apenas no frontend. Cada aba virou uma consulta própri
 ## CRM-FIX-04 — Eliminar truncamento silencioso no funil e na agenda — **CONCLUÍDO**
 Resolvido em 2026-09-06 nos dois repositórios. Criado `GET /crm/board`, que devolve cada etapa com página própria e agregados (`total`, `loaded`, `hasMore`, `estimatedValue`, `weightedValue`) calculados sobre o conjunto filtrado inteiro. A agregação é uma única consulta agrupada por `(stageId, probability)`, o que permite o valor ponderado sem SQL bruto e mantém uma só implementação dos filtros, em `buildOpportunityWhere`. Dinheiro é somado em `Prisma.Decimal` e serializado como string. O funil carrega 20 cards por etapa com `Carregar mais`; a agenda pagina por visão; o seletor de oportunidade em `/crm/visits` virou busca no servidor com debounce. O drag and drop é otimista com rollback de colunas e summaries. Migration aditiva `20260906010000_crm_board_stage_index`. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
 
-**Ressalvas:** timeline e histórico da oportunidade seguem sem paginação (BUG-08); atividades, reservas e propostas no detalhe seguem em 100 por bloco, por serem limites por oportunidade e não por tenant.
+**Ressalvas:** timeline e histórico da oportunidade foram paginados em CRM-FIX-08; atividades, reservas e propostas no detalhe seguem em 100 por bloco, por serem limites por oportunidade e não por tenant.
 ## CRM-FIX-05 — Seção de visitas no detalhe da oportunidade — **CONCLUÍDO**
 Resolvido em 2026-09-07, apenas no frontend. O backend já cobria todo o ciclo: `GET|POST /crm/visits` e `PATCH /crm/visits/:id` foram conferidos item a item antes de qualquer alteração e nenhuma lacuna real de contrato foi encontrada — nenhuma migration, DTO ou regra de domínio foi tocada. Criado `VisitsSectionComponent`, componente próprio no padrão de reservas e propostas, com loading, erro, retry e empty state independentes: uma falha ao listar visitas não derruba o resto do detalhe. A seção separa `Próximas visitas` (status `AGENDADA`, mais cedo primeiro, único bloco com ações) de `Histórico` (demais status, mais recente primeiro), e informa o excedente quando o total passa da página de 100. Agendar, reagendar, marcar como realizada com `outcome` estruturado, registrar não comparecimento e cancelar com motivo acontecem dentro da oportunidade. O reagendamento é `PATCH` na mesma visita, preservando id, tenant, oportunidade, criador e auditoria. A ação rápida `Agendar visita` foi ao cabeçalho do detalhe. Criado `opportunity-detail.component.spec.ts`, primeiro teste de componente do detalhe, com 29 casos. Suíte do frontend com 501 testes passando e build limpo. Contrato completo em `docs/crm.md`; detalhes em `docs/crm-master-audit.md`.
 
@@ -184,7 +184,8 @@ Resolvido em 2026-09-15 nos dois repositórios. `OpportunityStageHistory.lostRea
 **Ressalva:** motivos já apagados antes da correção são irrecuperáveis quando nenhuma outra fonte preservou o texto. O CRM-023 (catálogo estruturado) e o CRM-024 (relatório de perdas) continuam pendentes.
 ## CRM-FIX-07 — Resolver `SalesVisit.companyId` (usar ou remover) — **CONCLUÍDO**
 Resolvido em 2026-09-15 no backend. A relação era um artefato de drift: entrou no schema inicial de `SalesVisit`, mas não na migration, no DTO, no service, nos includes, nos filtros, nos relatórios, na seed nem no frontend; a migration seguinte apenas alinhou o banco ao schema sem definir semântica. A coluna e a relação foram removidas. A empresa/SPE de uma visita é derivada exclusivamente do empreendimento (`SalesVisit.developmentId → Development.companyId`), com a unidade validada no mesmo empreendimento. A migration `20260915010000_remove_sales_visit_company_relation` aborta se encontrar valor não nulo inesperado, remove a FK e a coluna e não toca nas linhas ou no histórico de visitas. Não existia índice correspondente. Nenhum banco de produção foi consultado ou alterado nesta execução; a consulta de inspeção manual está em `docs/crm-master-audit.md`.
-## CRM-FIX-08 — Paginar timeline e histórico — **PENDENTE (BAIXA)**
+## CRM-FIX-08 — Paginar timeline e histórico — **CONCLUÍDO**
+Resolvido em 2026-09-18 nos dois repositórios. O histórico usa `page/pageSize` e retorno paginado padrão. A timeline seleciona chaves das seis fontes por `UNION ALL` tenant-scoped, ordena por `occurredAt DESC, id ASC` e usa cursor por chave composta; hidrata somente eventos da página. O detalhe carrega 20 eventos inicialmente e oferece botões para etapas e eventos anteriores, com append, deduplicação, erro/retry e mescla de eventos novos. Sem migration: as seis fontes já têm índices com `organizationId` e `opportunityId`; não há índice simples que cubra os timestamps `COALESCE` de todas as fontes. Ver contrato e ressalva de timestamps mutáveis em `docs/crm.md`.
 ## CRM-FIX-09 — Consertar `npm run test:e2e` — **PENDENTE (BAIXA)**
 
 # Cenário E2E de referência

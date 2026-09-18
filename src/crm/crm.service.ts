@@ -25,8 +25,16 @@ import { CreateSalesActivityDto } from './dto/create-sales-activity.dto';
 import { ListOpportunitiesQueryDto } from './dto/list-opportunities-query.dto';
 import { ListSalesActivitiesQueryDto } from './dto/list-sales-activities-query.dto';
 import { MoveOpportunityDto } from './dto/move-opportunity.dto';
+import { OpportunityHistoryQueryDto } from './dto/opportunity-history-query.dto';
+import { OpportunityTimelineQueryDto } from './dto/opportunity-timeline-query.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 import { UpdateSalesActivityDto } from './dto/update-sales-activity.dto';
+import {
+  TimelineKey,
+  decodeTimelineCursor,
+  encodeTimelineCursor,
+  timelineKeysQuery,
+} from './opportunity-timeline-pagination';
 
 interface CrmActor {
   id: string;
@@ -581,25 +589,66 @@ export class CrmService {
     });
   }
 
-  async findOpportunityHistory(id: string, organizationId: string) {
+  async findOpportunityHistory(
+    id: string,
+    organizationId: string,
+    query: OpportunityHistoryQueryDto = {},
+  ) {
     await this.assertOpportunityExists(id, organizationId);
-    return this.prisma.opportunityStageHistory.findMany({
-      where: { opportunityId: id, organizationId },
-      include: {
-        fromStage: { select: { id: true, name: true, code: true } },
-        toStage: { select: { id: true, name: true, code: true } },
-        changedByUser: { select: { id: true, name: true, email: true } },
+    const page = query.page ?? 1;
+    const pageSize = query.pageSize ?? 20;
+    const where = { opportunityId: id, organizationId };
+    const [data, total] = await Promise.all([
+      this.prisma.opportunityStageHistory.findMany({
+        where,
+        include: {
+          fromStage: { select: { id: true, name: true, code: true } },
+          toStage: { select: { id: true, name: true, code: true } },
+          changedByUser: { select: { id: true, name: true, email: true } },
+        },
+        orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
+        skip: (page - 1) * pageSize,
+        take: pageSize,
+      }),
+      this.prisma.opportunityStageHistory.count({ where }),
+    ]);
+    return {
+      data,
+      pagination: {
+        page,
+        pageSize,
+        total,
+        totalPages: Math.ceil(total / pageSize),
       },
-      orderBy: [{ changedAt: 'desc' }, { id: 'desc' }],
-    });
+    };
   }
 
-  async findOpportunityTimeline(id: string, organizationId: string) {
+  async findOpportunityTimeline(
+    id: string,
+    organizationId: string,
+    query: OpportunityTimelineQueryDto = {},
+  ) {
     await this.assertOpportunityExists(id, organizationId);
+    const limit = query.limit ?? 20;
+    const after = decodeTimelineCursor(query.cursor, id);
+    const keys = await this.prisma.$queryRaw<TimelineKey[]>(
+      timelineKeysQuery(organizationId, id, after, limit + 1),
+    );
+    const pageKeys = keys.slice(0, limit);
+    if (!pageKeys.length) return { data: [], nextCursor: null };
+    const sourceIds = (source: string) =>
+      pageKeys
+        .filter((key) => key.id.startsWith(`${source}:`))
+        .map((key) => key.id.slice(source.length + 1));
+    const scopedIds = (source: string) => ({
+      id: { in: sourceIds(source) },
+      opportunityId: id,
+      organizationId,
+    });
     const [stageHistory, activities, visits, reservations, proposals, sales] =
       await Promise.all([
         this.prisma.opportunityStageHistory.findMany({
-          where: { opportunityId: id, organizationId },
+          where: scopedIds('stage'),
           include: {
             fromStage: { select: { name: true } },
             toStage: { select: { name: true, isLost: true } },
@@ -607,34 +656,34 @@ export class CrmService {
           },
         }),
         this.prisma.salesActivity.findMany({
-          where: { opportunityId: id, organizationId },
+          where: scopedIds('activity'),
           include: {
             assignedUser: { select: { id: true, name: true } },
           },
         }),
         this.prisma.salesVisit.findMany({
-          where: { opportunityId: id, organizationId },
+          where: scopedIds('visit'),
           include: {
             assignedUser: { select: { id: true, name: true } },
             unit: { select: { identifier: true } },
           },
         }),
         this.prisma.unitReservation.findMany({
-          where: { opportunityId: id, organizationId },
+          where: scopedIds('reservation'),
           include: {
             unit: { select: { identifier: true } },
             createdByUser: { select: { id: true, name: true } },
           },
         }),
         this.prisma.salesProposal.findMany({
-          where: { opportunityId: id, organizationId },
+          where: scopedIds('proposal'),
           include: {
             unit: { select: { identifier: true } },
             createdByUser: { select: { id: true, name: true } },
           },
         }),
         this.prisma.sale.findMany({
-          where: { opportunityId: id, organizationId },
+          where: scopedIds('sale'),
           include: {
             unit: { select: { identifier: true } },
             createdByUser: { select: { id: true, name: true } },
@@ -712,10 +761,17 @@ export class CrmService {
       })),
     ];
 
-    return events.sort((a, b) => {
-      const byDate = b.occurredAt.getTime() - a.occurredAt.getTime();
-      return byDate || a.id.localeCompare(b.id);
-    });
+    const byId = new Map(events.map((event) => [event.id, event]));
+    return {
+      data: pageKeys.flatMap((key) => {
+        const event = byId.get(key.id);
+        return event ? [{ ...event, occurredAt: key.occurredAt }] : [];
+      }),
+      nextCursor:
+        keys.length > limit && pageKeys.length
+          ? encodeTimelineCursor(id, pageKeys[pageKeys.length - 1])
+          : null,
+    };
   }
 
   /**
