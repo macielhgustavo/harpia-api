@@ -422,8 +422,10 @@ npm run test:cov
 `npm run test:e2e` cria por padrão um PostgreSQL 16 descartável em Docker,
 recria somente o schema `public` desse banco, aplica todas as migrations com
 `prisma migrate deploy`, executa os specs serialmente e remove o container ao
-final. Docker precisa estar instalado e com o engine ativo; nenhuma `.env.test`
-é necessária.
+final. Se o engine não responder, o runner procura automaticamente uma
+instalação nativa de PostgreSQL (`Program Files/PostgreSQL` no Windows ou
+`initdb` no `PATH`) e cria um cluster temporário próprio. Nenhuma `.env.test` é
+necessária.
 
 Também é possível usar uma instalação local de PostgreSQL. Informe o diretório
 que contém `initdb`, `pg_ctl` e `createdb`; o runner criará e removerá um cluster

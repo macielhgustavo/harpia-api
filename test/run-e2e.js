@@ -1,8 +1,8 @@
 const { randomUUID } = require('node:crypto');
 const { spawnSync } = require('node:child_process');
-const { mkdtempSync, rmSync } = require('node:fs');
+const { existsSync, mkdtempSync, readdirSync, rmSync } = require('node:fs');
 const { tmpdir } = require('node:os');
-const { join } = require('node:path');
+const { dirname, join } = require('node:path');
 
 const isWindows = process.platform === 'win32';
 const docker = isWindows ? 'docker.exe' : 'docker';
@@ -157,6 +157,48 @@ function startNativePostgres(postgresBin) {
   return `postgresql://postgres@127.0.0.1:${port}/${databaseName}?schema=public`;
 }
 
+function findNativePostgres() {
+  if (process.env.E2E_POSTGRES_BIN) return process.env.E2E_POSTGRES_BIN;
+  if (isWindows) {
+    const root = 'C:\\Program Files\\PostgreSQL';
+    if (!existsSync(root)) return null;
+    const versions = readdirSync(root).sort((left, right) =>
+      right.localeCompare(left, undefined, { numeric: true }),
+    );
+    return (
+      versions
+        .map((version) => join(root, version, 'bin'))
+        .find((bin) =>
+          ['initdb.exe', 'pg_ctl.exe', 'createdb.exe'].every((file) =>
+            existsSync(join(bin, file)),
+          ),
+        ) ?? null
+    );
+  }
+  const lookup = spawnSync('sh', ['-c', 'command -v initdb'], {
+    encoding: 'utf8',
+    stdio: 'pipe',
+  });
+  return lookup.status === 0 && lookup.stdout.trim()
+    ? dirname(lookup.stdout.trim())
+    : null;
+}
+
+function startDefaultPostgres() {
+  try {
+    return startEphemeralPostgres();
+  } catch (dockerError) {
+    const postgresBin = findNativePostgres();
+    if (postgresBin) {
+      console.warn(
+        `Docker indisponível; usando PostgreSQL nativo em ${postgresBin}.`,
+      );
+      return startNativePostgres(postgresBin);
+    }
+    throw dockerError;
+  }
+}
+
 function cleanup() {
   if (ownsContainer) {
     spawnSync(docker, ['rm', '--force', containerName], { stdio: 'ignore' });
@@ -179,7 +221,7 @@ try {
     process.env.E2E_DATABASE_URL ||
     (process.env.E2E_POSTGRES_BIN
       ? startNativePostgres(process.env.E2E_POSTGRES_BIN)
-      : startEphemeralPostgres());
+      : startDefaultPostgres());
   assertSafeDatabase(databaseUrl);
   const env = {
     ...process.env,
