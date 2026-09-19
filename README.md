@@ -417,6 +417,42 @@ npm run test:e2e
 npm run test:cov
 ```
 
+## E2E da API
+
+`npm run test:e2e` cria por padrão um PostgreSQL 16 descartável em Docker,
+recria somente o schema `public` desse banco, aplica todas as migrations com
+`prisma migrate deploy`, executa os specs serialmente e remove o container ao
+final. Docker precisa estar instalado e com o engine ativo; nenhuma `.env.test`
+é necessária.
+
+Também é possível usar uma instalação local de PostgreSQL. Informe o diretório
+que contém `initdb`, `pg_ctl` e `createdb`; o runner criará e removerá um cluster
+temporário próprio:
+
+```powershell
+$env:E2E_POSTGRES_BIN = 'C:\Program Files\PostgreSQL\18\bin'
+npm run test:e2e
+```
+
+Em Linux/macOS, o valor pode ser `/usr/lib/postgresql/16/bin` ou o diretório
+equivalente da instalação. `E2E_POSTGRES_PORT` é opcional.
+
+Para um banco já provisionado, use `E2E_DATABASE_URL`. A proteção do runner
+exige `NODE_ENV=test` nos processos filhos, protocolo PostgreSQL e nome de banco
+contendo `test` ou `e2e`; host remoto exige ainda
+`E2E_ALLOW_REMOTE_DATABASE=true`. A URL idêntica a `PRODUCTION_DATABASE_URL` é
+sempre recusada. O schema `public` do banco E2E informado é recriado, portanto
+essa opção deve apontar exclusivamente para testes.
+
+```bash
+E2E_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/harpia_e2e npm run test:e2e
+```
+
+`npm run test:e2e:crm` filtra a mesma infraestrutura para os specs comerciais.
+O setup direto cria apenas organização, usuários autenticáveis e catálogo
+imobiliário; pessoa, oportunidade, atividade, visita, reserva, proposta, aceite
+e venda atravessam os contratos HTTP reais e os guards da aplicação.
+
 Antes de considerar um bloco concluído:
 
 ```bash

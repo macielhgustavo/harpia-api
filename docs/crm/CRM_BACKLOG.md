@@ -151,7 +151,11 @@ Existe motor de automação apenas para cobrança (`collections-automation.servi
 ## CRM-049 — Empty states — **PARCIAL** (existem em todas as telas de CRM; só a seção de visitas do detalhe tem CTA de ação)
 ## CRM-050 — Performance — **PARCIAL** (paginação no servidor cobre timeline e histórico; outros blocos do detalhe continuam limitados a 100 por lista)
 ## CRM-051 — Observabilidade — **PENDENTE**
-## CRM-052 — E2E completo — **PENDENTE** (`npm run test:e2e` aponta para um diretório inexistente. Testes de componente já existem para `/crm`, `/crm/tasks`, `/crm/visits` e o detalhe da oportunidade; não há E2E de ponta a ponta)
+## CRM-052 — E2E completo — **CONCLUÍDO**
+
+Resolvido em 2026-09-18 no backend. `npm run test:e2e` agora sobe PostgreSQL descartável (Docker por padrão ou cluster nativo opcional), protege explicitamente o destino, recria apenas o schema do banco identificado como teste, aplica as 24 migrations reais com `prisma migrate deploy` e executa três specs serializados. O caminho HTTP autenticado cobre pessoa → oportunidade → atividade → visita → unidade → reserva → proposta → aceite → venda, timeline cursorada, histórico, Decimal, recebíveis, CRM-FIX-01 e CRM-FIX-06. Há casos separados de tenancy, RBAC `LEITURA`, reserva concorrente e rollback de uma conversão em venda que falha após tentar ganhar a oportunidade. Instruções reproduzíveis em `README.md`; detalhes em `docs/crm-master-audit.md`.
+
+**Limites conscientes:** catálogo imobiliário e credenciais são factories de setup, não repetição E2E de CRUD alheio ao ciclo; browser E2E continua evolução futura. Score, health, matching e próxima ação não foram simulados porque ainda não existem no produto.
 
 # Correções pendentes levantadas pela re-auditoria
 
@@ -189,7 +193,7 @@ Resolvido em 2026-09-18 nos dois repositórios. O histórico usa `page/pageSize`
 ## CRM-FIX-09 — Validar transições de estado de SalesVisit — **CONCLUÍDO**
 Resolvido em 2026-09-18. `AGENDADA` é o único estado editável e a origem das transições para `REALIZADA`, `NAO_COMPARECEU` ou `CANCELADA`; estados finais não podem ser alterados por `PATCH`. A decisão ocorre sob lock tenant-scoped no writer único de visitas. Cancelamento exige motivo e nunca conserva `result`/`outcome`; ausência também não aceita resultado; realização mantém outcome opcional por compatibilidade. No-op não cria update nem auditoria. A interface só oferece ações válidas e recarrega após `409`. Sem migration. Ver `docs/crm.md` e resolução separada do BUG-09 em `docs/crm-master-audit.md`.
 
-**Pendente fora deste item:** `npm run test:e2e` continua sem cenário executável, registrado em CRM-052/BUG-10. Esta identificação havia sido atribuída a E2E no backlog anterior; foi realinhada à tarefa CRM-FIX-09 solicitada, sem declarar E2E concluído.
+**Pendência então existente, agora resolvida:** na entrega de CRM-FIX-09, `npm run test:e2e` ainda não possuía cenário executável. CRM-052/BUG-10 foi concluído posteriormente em 2026-09-18, sem alterar a resolução de visitas.
 
 # Cenário E2E de referência
 
@@ -197,4 +201,4 @@ João Silva → Instagram → Residencial Aurora → 2 quartos → até R$ 500 m
 
 Validar timeline, score, health, próxima ação, auditoria, tenancy, RBAC e ausência de duplicidade.
 
-Hoje esse cenário é executável até "reserva → proposta → aceite → venda", com a ressalva de que o interesse imobiliário, as unidades compatíveis, o score e a próxima ação ainda não existem. Desde o CRM-FIX-05, todo o trecho de visita — agendar, reagendar, realizar com resultado, registrar ausência e cancelar — é executável sem sair da tela da oportunidade.
+O recorte existente desse cenário agora é também provado em E2E até "reserva → proposta → aceite → venda", com a ressalva de que interesse imobiliário estruturado, unidades compatíveis, score, health e próxima ação ainda não existem. Desde o CRM-FIX-05, todo o trecho de visita — agendar, reagendar, realizar com resultado, registrar ausência e cancelar — é executável sem sair da tela da oportunidade.

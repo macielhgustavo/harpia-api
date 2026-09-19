@@ -27,6 +27,3 @@ Thumbs.db
 
 # Claude Code local config
 .claude/
-
-# Test scaffold (vazio)
-test/

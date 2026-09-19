@@ -248,3 +248,9 @@ Nenhuma lista do CRM é apresentada como completa quando não é.
 - **`/crm/visits`**: o seletor de oportunidade passou a ser busca no servidor com *debounce* de 300 ms, cobrindo qualquer oportunidade do tenant. A quantidade não exibida é informada.
 
 Limites que permanecem, por serem por oportunidade e não por tenant: atividades, visitas, reservas e propostas dentro do detalhe da oportunidade carregam até 100 registros cada — a seção de visitas informa quantas não está mostrando quando o total excede a página. Histórico e timeline começam com 20 eventos e oferecem carregamento incremental.
+
+## Base E2E do ciclo comercial (CRM-052)
+
+O contrato comercial integrado é protegido por três specs contra PostgreSQL real. O setup direto cria apenas tenant, usuários e catálogo; autenticação e o ciclo Pessoa → Opportunity → Activity → Visit → Unit → Reservation → Proposal → Sale percorrem HTTP real. O cenário valida as seis fontes da timeline com cursor, ganho centralizado, motivo de perda histórico, Decimal e recebíveis. Specs menores cobrem isolamento entre tenants, RBAC de leitura, reserva concorrente e rollback após falha de unicidade na venda.
+
+O executor `test/run-e2e.js` usa Docker efêmero por padrão, aceita cluster PostgreSQL nativo descartável via `E2E_POSTGRES_BIN` ou banco exclusivamente de testes via `E2E_DATABASE_URL`, sempre sob os guards documentados no `README.md`. O schema é recriado e todas as migrations são aplicadas por `prisma migrate deploy`; não se usa `db push`, SQLite nem mock de service. Browser E2E não faz parte desta base.
