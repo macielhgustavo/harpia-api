@@ -1,5 +1,9 @@
 /* eslint-disable @typescript-eslint/no-unsafe-assignment */
-import { BadRequestException, NotFoundException } from '@nestjs/common';
+import {
+  BadRequestException,
+  ConflictException,
+  NotFoundException,
+} from '@nestjs/common';
 import { SalesVisitStatus } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
@@ -233,6 +237,7 @@ describe('VisitsService', () => {
     ).rejects.toThrow(BadRequestException);
 
     expect(tx.salesVisit.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
   });
 
   it('fails closed when the visit does not belong to the tenant', async () => {
@@ -266,7 +271,6 @@ describe('VisitsService', () => {
         scheduledAt: new Date('2026-09-11T15:30:00.000Z'),
         durationMinutes: 90,
         notes: 'Reagendada com o cliente',
-        status: SalesVisitStatus.AGENDADA,
       }),
     );
     expect(updateArgs.data).not.toHaveProperty('companyId');
@@ -286,14 +290,97 @@ describe('VisitsService', () => {
       tx,
     );
   });
+
+  it('does not write or audit a same-state no-op', async () => {
+    tx.$queryRaw.mockResolvedValue([lockedVisit()]);
+    tx.salesVisit.findUniqueOrThrow.mockResolvedValue({ id: 'visit-1' });
+
+    await expect(
+      service.update('visit-1', actor, { status: SalesVisitStatus.AGENDADA }),
+    ).resolves.toEqual({ id: 'visit-1' });
+
+    expect(tx.salesVisit.update).not.toHaveBeenCalled();
+    expect(audit.record).not.toHaveBeenCalled();
+    expect(tx.salesVisit.findUniqueOrThrow).toHaveBeenCalledWith(
+      expect.objectContaining({ where: { id: 'visit-1' } }),
+    );
+  });
+
+  it('persists and audits a cancellation reason without a result', async () => {
+    tx.$queryRaw.mockResolvedValue([lockedVisit()]);
+    tx.salesVisit.update.mockResolvedValue({ id: 'visit-1' });
+
+    await service.update('visit-1', actor, {
+      status: SalesVisitStatus.CANCELADA,
+      cancellationReason: ' Cliente desistiu ',
+    });
+
+    expect(tx.salesVisit.update).toHaveBeenCalledWith(
+      expect.objectContaining({
+        data: expect.objectContaining({
+          status: SalesVisitStatus.CANCELADA,
+          cancellationReason: 'Cliente desistiu',
+          result: null,
+          outcome: null,
+          completedAt: null,
+          cancelledAt: expect.any(Date),
+        }),
+      }),
+    );
+    expect(audit.record).toHaveBeenCalledWith(
+      expect.objectContaining({
+        metadata: {
+          changedFields: ['status', 'cancellationReason'],
+          status: SalesVisitStatus.CANCELADA,
+        },
+      }),
+      tx,
+    );
+  });
+
+  it('rejects a stale second transition after the locked row becomes terminal', async () => {
+    tx.$queryRaw
+      .mockResolvedValueOnce([lockedVisit()])
+      .mockResolvedValueOnce([
+        { ...lockedVisit(), status: SalesVisitStatus.REALIZADA },
+      ]);
+    tx.salesVisit.update.mockResolvedValue({ id: 'visit-1' });
+
+    await service.update('visit-1', actor, {
+      status: SalesVisitStatus.REALIZADA,
+    });
+    await expect(
+      service.update('visit-1', actor, {
+        status: SalesVisitStatus.CANCELADA,
+        cancellationReason: 'Tarde demais',
+      }),
+    ).rejects.toThrow(ConflictException);
+
+    expect(tx.salesVisit.update).toHaveBeenCalledTimes(1);
+    expect(audit.record).toHaveBeenCalledTimes(1);
+  });
+
+  it('keeps the row lock scoped to the session tenant', async () => {
+    tx.$queryRaw.mockResolvedValue([lockedVisit()]);
+    tx.salesVisit.findUniqueOrThrow.mockResolvedValue({ id: 'visit-1' });
+    await service.update('visit-1', actor, {});
+    const [query] = tx.$queryRaw.mock.calls[0] as [string[]];
+    expect(query.join('')).toContain('"organizationId" = ');
+    expect(tx.$queryRaw.mock.calls[0]).toContain('org-a');
+  });
 });
 
 function lockedVisit() {
   return {
     id: 'visit-1',
     assignedUserId: null,
+    scheduledAt: new Date('2026-09-10T14:00:00.000Z'),
+    durationMinutes: 60,
     status: SalesVisitStatus.AGENDADA,
     outcome: null,
+    location: null,
+    result: null,
+    notes: null,
     cancellationReason: null,
     completedAt: null,
     cancelledAt: null,
@@ -318,7 +405,11 @@ function transactionMock() {
     user: { findFirst: jest.fn() },
     unit: { findFirst: jest.fn() },
     development: { findFirst: jest.fn() },
-    salesVisit: { create: jest.fn(), update: jest.fn() },
+    salesVisit: {
+      create: jest.fn(),
+      update: jest.fn(),
+      findUniqueOrThrow: jest.fn(),
+    },
   };
 }
 

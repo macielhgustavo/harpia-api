@@ -723,7 +723,8 @@ export class CrmService {
         title: item.unit
           ? `Visita à unidade ${item.unit.identifier}`
           : 'Visita comercial',
-        description: item.result || item.notes || item.location,
+        description:
+          item.cancellationReason || item.result || item.notes || item.location,
         status: item.status,
         actor: item.assignedUser,
       })),

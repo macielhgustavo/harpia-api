@@ -452,10 +452,11 @@ describe('CrmService', () => {
         id: 'visit-1',
         scheduledAt: new Date('2026-09-03T10:00:00.000Z'),
         completedAt: null,
-        cancelledAt: null,
-        status: SalesVisitStatus.AGENDADA,
+        cancelledAt: new Date('2026-09-03T10:00:00.000Z'),
+        status: SalesVisitStatus.CANCELADA,
         result: null,
         notes: 'Conhecer o decorado',
+        cancellationReason: 'Cliente desistiu',
         location: null,
         assignedUser: { id: 'user-1', name: 'Ana' },
         unit: { identifier: '305' },
@@ -478,8 +479,8 @@ describe('CrmService', () => {
     expect(timeline.data[0]).toEqual(
       expect.objectContaining({
         title: 'Visita à unidade 305',
-        description: 'Conhecer o decorado',
-        status: SalesVisitStatus.AGENDADA,
+        description: 'Cliente desistiu',
+        status: SalesVisitStatus.CANCELADA,
       }),
     );
     expect(prisma.salesVisit.findMany).toHaveBeenCalledWith({

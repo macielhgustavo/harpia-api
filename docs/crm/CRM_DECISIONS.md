@@ -97,6 +97,11 @@ Novas frentes grandes fora do CRM exigem justificativa forte até o CRM atingir 
 
 # Template
 
+## ADR-020 — Visitas têm estados finais irreversíveis por PATCH
+**Status:** APROVADO
+
+`SalesVisit` nasce `AGENDADA`; somente esse estado pode ser editado, reagendado ou finalizado em `REALIZADA`, `NAO_COMPARECEU` ou `CANCELADA`. Os três destinos são terminais no contrato atual. O backend decide sobre a linha bloqueada e registra mudança e auditoria atomicamente. Não há fluxo de correção autorizado: caso necessário, ele deverá ser desenhado explicitamente, preservando histórico e permissões. `outcome` segue opcional para visitas realizadas para não invalidar clientes existentes; `result` só faz sentido em `REALIZADA`. Nenhum estado ou coluna nova foi adicionado.
+
 ## ADR-XXX — Título
 **Status:** PROPOSTO / APROVADO / REVOGADO
 

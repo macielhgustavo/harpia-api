@@ -3,27 +3,21 @@ import {
   Injectable,
   NotFoundException,
 } from '@nestjs/common';
-import { Prisma, SalesVisitOutcome, SalesVisitStatus } from '@prisma/client';
+import { Prisma } from '@prisma/client';
 import { AUDIT_ACTIONS, AUDIT_ENTITY_TYPES } from '../audit/audit-events';
 import { AuditService } from '../audit/audit.service';
 import { PrismaService } from '../prisma/prisma.service';
 import { CreateSalesVisitDto } from './dto/create-sales-visit.dto';
 import { ListSalesVisitsQueryDto } from './dto/list-sales-visits-query.dto';
 import { UpdateSalesVisitDto } from './dto/update-sales-visit.dto';
+import {
+  LockedSalesVisit,
+  planSalesVisitUpdate,
+} from './sales-visit-transition';
 
 interface VisitActor {
   id: string;
   organizationId: string;
-}
-
-interface LockedVisit {
-  id: string;
-  assignedUserId: string | null;
-  status: SalesVisitStatus;
-  outcome: SalesVisitOutcome | null;
-  cancellationReason: string | null;
-  completedAt: Date | null;
-  cancelledAt: Date | null;
 }
 
 const VISIT_INCLUDE = {
@@ -140,55 +134,23 @@ export class VisitsService {
   async update(id: string, actor: VisitActor, dto: UpdateSalesVisitDto) {
     return this.prisma.$transaction(async (tx) => {
       const current = await this.lockVisit(tx, id, actor.organizationId);
-      const assignedUserId =
-        dto.assignedUserId === undefined
-          ? current.assignedUserId
-          : dto.assignedUserId;
-      await this.assertAssignedUser(tx, assignedUserId, actor.organizationId);
-
-      const status = dto.status ?? current.status;
-      const outcome = dto.outcome === undefined ? current.outcome : dto.outcome;
-      const cancellationReason =
-        dto.cancellationReason === undefined
-          ? current.cancellationReason
-          : dto.cancellationReason;
-      if (
-        status === SalesVisitStatus.CANCELADA &&
-        !cancellationReason?.trim()
-      ) {
-        throw new BadRequestException('Informe o motivo do cancelamento');
+      const plan = planSalesVisitUpdate(current, dto);
+      if (!plan) {
+        return tx.salesVisit.findUniqueOrThrow({
+          where: { id },
+          include: VISIT_INCLUDE,
+        });
       }
-      if (outcome && status !== SalesVisitStatus.REALIZADA) {
-        throw new BadRequestException(
-          'O resultado estruturado exige uma visita realizada',
+      if (plan.changedFields.includes('assignedUserId')) {
+        await this.assertAssignedUser(
+          tx,
+          dto.assignedUserId,
+          actor.organizationId,
         );
       }
-
-      const isCompleted =
-        status === SalesVisitStatus.REALIZADA ||
-        status === SalesVisitStatus.NAO_COMPARECEU;
-      const changedFields = Object.keys(dto).filter(
-        (field) => dto[field as keyof UpdateSalesVisitDto] !== undefined,
-      );
       const visit = await tx.salesVisit.update({
         where: { id },
-        data: {
-          assignedUserId,
-          scheduledAt: dto.scheduledAt ? new Date(dto.scheduledAt) : undefined,
-          durationMinutes: dto.durationMinutes,
-          status,
-          outcome: status === SalesVisitStatus.REALIZADA ? outcome : null,
-          location: dto.location,
-          result: dto.result,
-          notes: dto.notes,
-          completedAt: isCompleted ? (current.completedAt ?? new Date()) : null,
-          cancelledAt:
-            status === SalesVisitStatus.CANCELADA
-              ? (current.cancelledAt ?? new Date())
-              : null,
-          cancellationReason:
-            status === SalesVisitStatus.CANCELADA ? cancellationReason : null,
-        },
+        data: plan.data,
         include: VISIT_INCLUDE,
       });
       await this.audit.record(
@@ -198,7 +160,10 @@ export class VisitsService {
           action: AUDIT_ACTIONS.SALES_VISIT_UPDATED,
           entityType: AUDIT_ENTITY_TYPES.SALES_VISIT,
           entityId: id,
-          metadata: { changedFields, status },
+          metadata: {
+            changedFields: plan.changedFields,
+            status: plan.data.status ?? current.status,
+          },
         },
         tx,
       );
@@ -211,8 +176,9 @@ export class VisitsService {
     id: string,
     organizationId: string,
   ) {
-    const [visit] = await tx.$queryRaw<LockedVisit[]>`
-      SELECT "id", "assignedUserId", "status", "outcome",
+    const [visit] = await tx.$queryRaw<LockedSalesVisit[]>`
+      SELECT "id", "assignedUserId", "scheduledAt", "durationMinutes",
+             "status", "outcome", "location", "result", "notes",
              "cancellationReason", "completedAt", "cancelledAt"
       FROM "SalesVisit"
       WHERE "id" = ${id} AND "organizationId" = ${organizationId}
