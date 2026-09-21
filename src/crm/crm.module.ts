@@ -3,10 +3,11 @@ import { CrmController } from './crm.controller';
 import { CrmService } from './crm.service';
 import { VisitsController } from './visits.controller';
 import { VisitsService } from './visits.service';
+import { OpportunityPropertyInterestsService } from './opportunity-property-interests.service';
 
 @Module({
   controllers: [CrmController, VisitsController],
-  providers: [CrmService, VisitsService],
+  providers: [CrmService, VisitsService, OpportunityPropertyInterestsService],
   exports: [CrmService],
 })
 export class CrmModule {}

@@ -134,7 +134,14 @@ const OPPORTUNITY_INCLUDE = {
   stage: true,
   assignedUser: { select: { id: true, name: true, email: true } },
   development: { select: { id: true, name: true } },
-  unit: { select: { id: true, identifier: true, developmentId: true } },
+  unit: {
+    select: {
+      id: true,
+      identifier: true,
+      developmentId: true,
+      unitTypeId: true,
+    },
+  },
   _count: { select: { activities: true, stageHistory: true } },
 } as const satisfies Prisma.OpportunityInclude;
 

@@ -6,6 +6,7 @@ import {
   Param,
   Patch,
   Post,
+  Put,
   Query,
 } from '@nestjs/common';
 import { CurrentUser } from '../auth/decorators/current-user.decorator';
@@ -23,6 +24,8 @@ import { OpportunityHistoryQueryDto } from './dto/opportunity-history-query.dto'
 import { OpportunityTimelineQueryDto } from './dto/opportunity-timeline-query.dto';
 import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 import { UpdateSalesActivityDto } from './dto/update-sales-activity.dto';
+import { UpsertOpportunityPropertyInterestDto } from './dto/upsert-opportunity-property-interest.dto';
+import { OpportunityPropertyInterestsService } from './opportunity-property-interests.service';
 
 interface AuthUser {
   id: string;
@@ -32,7 +35,10 @@ interface AuthUser {
 @RequirePermissions(PERMISSIONS.CRM_READ)
 @Controller('crm')
 export class CrmController {
-  constructor(private readonly crm: CrmService) {}
+  constructor(
+    private readonly crm: CrmService,
+    private readonly propertyInterests: OpportunityPropertyInterestsService,
+  ) {}
 
   @Get('pipelines')
   findPipelines(@CurrentUser() user: AuthUser) {
@@ -77,6 +83,33 @@ export class CrmController {
     @Query() query: OpportunityTimelineQueryDto,
   ) {
     return this.crm.findOpportunityTimeline(id, user.organizationId, query);
+  }
+
+  @Get('opportunities/:id/interest')
+  findOpportunityPropertyInterest(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.propertyInterests.findOne(id, user.organizationId);
+  }
+
+  @RequirePermissions(PERMISSIONS.CRM_WRITE)
+  @Put('opportunities/:id/interest')
+  upsertOpportunityPropertyInterest(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Body() dto: UpsertOpportunityPropertyInterestDto,
+  ) {
+    return this.propertyInterests.upsert(id, user, dto);
+  }
+
+  @RequirePermissions(PERMISSIONS.CRM_WRITE)
+  @Delete('opportunities/:id/interest')
+  removeOpportunityPropertyInterest(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+  ) {
+    return this.propertyInterests.remove(id, user);
   }
 
   @Get('opportunities/:id')

@@ -37,6 +37,7 @@ model Organization {
   salesPipelines               SalesPipeline[]
   salesStages                  SalesStage[]
   opportunities                Opportunity[]
+  opportunityPropertyInterests OpportunityPropertyInterest[]
   opportunityStageHistory      OpportunityStageHistory[]
   salesActivities              SalesActivity[]
   salesVisits                  SalesVisit[]
@@ -292,6 +293,7 @@ model Development {
   allocations           Allocation[]
   documents             Document[]
   opportunities         Opportunity[]
+  propertyInterests     OpportunityPropertyInterest[]
   sales                 Sale[]
   costCenters           CostCenter[]
   payables              Payable[]
@@ -312,7 +314,8 @@ model UnitType {
   createdAt      DateTime     @default(now())
   updatedAt      DateTime     @updatedAt
 
-  units Unit[]
+  units             Unit[]
+  propertyInterests OpportunityPropertyInterest[]
 }
 
 model Unit {
@@ -416,12 +419,13 @@ model Opportunity {
   createdAt         DateTime      @default(now())
   updatedAt         DateTime      @updatedAt
 
-  stageHistory   OpportunityStageHistory[]
-  activities     SalesActivity[]
-  visits         SalesVisit[]
-  reservations   UnitReservation[]
-  salesProposals SalesProposal[]
-  sales          Sale[]
+  stageHistory     OpportunityStageHistory[]
+  activities       SalesActivity[]
+  visits           SalesVisit[]
+  reservations     UnitReservation[]
+  salesProposals   SalesProposal[]
+  sales            Sale[]
+  propertyInterest OpportunityPropertyInterest?
 
   @@index([organizationId, stageId, createdAt])
   @@index([organizationId, pipelineId, createdAt])
@@ -432,6 +436,40 @@ model Opportunity {
   @@index([organizationId, nextContactAt])
   @@index([organizationId, stageId, stageEnteredAt])
   @@index([organizationId, stageId, updatedAt])
+}
+
+enum PropertyInterestPurpose {
+  MORADIA
+  INVESTIMENTO
+  SEGUNDA_MORADIA
+  OUTRO
+}
+
+model OpportunityPropertyInterest {
+  id                   String                   @id @default(cuid())
+  organizationId       String
+  organization         Organization             @relation(fields: [organizationId], references: [id], onDelete: Cascade)
+  opportunityId        String                   @unique
+  opportunity          Opportunity              @relation(fields: [opportunityId], references: [id], onDelete: Cascade)
+  developmentId        String?
+  development          Development?             @relation(fields: [developmentId], references: [id], onDelete: SetNull)
+  unitTypeId           String?
+  unitType             UnitType?                @relation(fields: [unitTypeId], references: [id], onDelete: SetNull)
+  minBedrooms          Int?
+  maxBedrooms          Int?
+  minArea              Float?
+  maxArea              Float?
+  minPrice             Decimal?                 @db.Decimal(18, 2)
+  maxPrice             Decimal?                 @db.Decimal(18, 2)
+  availableDownPayment Decimal?                 @db.Decimal(18, 2)
+  purpose              PropertyInterestPurpose?
+  notes                String?
+  createdAt            DateTime                 @default(now())
+  updatedAt            DateTime                 @updatedAt
+
+  @@index([organizationId, opportunityId])
+  @@index([developmentId, organizationId])
+  @@index([unitTypeId, organizationId])
 }
 
 model OpportunityStageHistory {

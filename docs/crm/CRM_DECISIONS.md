@@ -95,6 +95,11 @@ Novas frentes grandes fora do CRM exigem justificativa forte até o CRM atingir 
 
 `SalesVisit` não possui `companyId`. Quando a visita tem empreendimento, a empresa/SPE é obtida pela relação já autoritativa `SalesVisit.developmentId → Development.companyId`; quando tem unidade, o backend garante que ela pertence ao mesmo empreendimento. Duplicar a empresa na visita criaria duas fontes mutáveis e permitiria combinações inconsistentes. Visita sem empreendimento não recebe empresa artificial.
 
+## ADR-021 — Preferências não são a unidade selecionada
+**Status:** APROVADO
+
+`OpportunityPropertyInterest` é opcional e único por oportunidade. Guarda a intenção atual do cliente sem derivar nem atualizar `Opportunity.unitId`; referências a empreendimento e tipologia são opcionais e validadas no tenant, e a tipologia deve pertencer ao empreendimento escolhido. O `PUT` substitui o perfil inteiro e não cria versões históricas; mudanças são rastreadas no AuditLog com metadados mínimos. Dinheiro usa `Decimal(18,2)`, área segue os m² decimais de Unit/UnitType, e o objetivo usa quatro valores estáveis. A tabela é aditiva e não requer backfill. CRM-017 poderá consultar o perfil, mas não há matching, score ou recomendação nesta decisão.
+
 # Template
 
 ## ADR-020 — Visitas têm estados finais irreversíveis por PATCH

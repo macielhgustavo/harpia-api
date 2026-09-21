@@ -11,6 +11,7 @@ Em produção, migrations pendentes são aplicadas pela própria inicialização
 - `SalesPipeline`: funil comercial configurável. O primeiro acesso cria, sob lock transacional, o pipeline padrão da organização.
 - `SalesStage`: etapa ordenada do funil, com `defaultProbability` (`Int`, CHECK 0–100). Cada pipeline possui exatamente uma etapa ganha e uma perdida.
 - `Opportunity`: oportunidade ligada a uma pessoa e, opcionalmente, a responsável, empreendimento e unidade.
+- `OpportunityPropertyInterest`: perfil opcional e único por oportunidade, com preferências imobiliárias independentes da unidade selecionada. A ausência de perfil é normal em oportunidades antigas.
 - `OpportunityStageHistory`: histórico comercial imutável das movimentações de etapa, incluindo a etapa inicial. Entradas em etapa perdida preservam o `lostReason` daquele evento.
 - `SalesActivity`: atividade ligada à oportunidade e à sua pessoa, com status, prioridade, lembrete e resultado.
 - `SalesVisit`: visita imobiliária estruturada, ligada à oportunidade, pessoa, responsável, empreendimento e unidade, com agenda, duração, comparecimento e resultado.
@@ -24,6 +25,7 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 - `SalesActivityPriority`: `BAIXA`, `NORMAL`, `ALTA`, `URGENTE`.
 - `SalesVisitStatus`: `AGENDADA`, `REALIZADA`, `CANCELADA`, `NAO_COMPARECEU`.
 - `SalesVisitOutcome`: `INTERESSE_ALTO`, `INTERESSE_MEDIO`, `INTERESSE_BAIXO`, `SEM_INTERESSE`, `REAGENDAR`.
+- `PropertyInterestPurpose`: `MORADIA`, `INVESTIMENTO`, `SEGUNDA_MORADIA`, `OUTRO`.
 
 ## Regras principais
 
@@ -41,6 +43,7 @@ O pipeline padrão contém: Novo (5%), Contato inicial (15%), Qualificado (30%),
 - Visitas começam agendadas; realização, ausência ou cancelamento preservam o marco temporal enquanto o status permanecer naquela classe. Cancelamento exige motivo e `outcome` estruturado só pode ser informado para visita realizada.
 - A empresa/SPE de uma visita não é armazenada diretamente. Quando houver empreendimento, ela é derivada por `SalesVisit.developmentId → Development.companyId`; quando houver unidade, `resolveLocation` garante que ela pertence ao mesmo empreendimento. Visitas sem empreendimento também não possuem empresa inferível.
 - `estimatedValue` é recebido como string decimal canônica e armazenado como `Decimal(18,2)`. A API nunca usa ponto flutuante para dinheiro comercial novo.
+- O perfil de interesse não determina nem altera `Opportunity.unitId` ou `Opportunity.developmentId`. Empreendimento e tipologia desejados são referências opcionais próprias; uma tipologia exige empreendimento do mesmo tenant e pertencimento a ele. A unidade existente serve somente como sugestão inicial na interface.
 - O histórico de etapa atende à operação comercial e é a fonte de verdade para motivos de perdas passadas. O `AuditLog` append-only registra autoria e mutações para rastreabilidade, mas não é a fonte analítica do CRM.
 
 ### Semântica do motivo de perda
@@ -75,6 +78,11 @@ Leitura exige `CRM_READ`; mutações exigem `CRM_WRITE`. O guard é global e fai
 - `POST /crm/opportunities/:id/move`
 - `GET /crm/opportunities/:id/history?page=1&pageSize=20` — `{ data, pagination: { page, pageSize, total, totalPages } }`, máximo 100; ordenação `changedAt DESC, id DESC`.
 - `GET /crm/opportunities/:id/timeline?limit=20&cursor=...` — `{ data, nextCursor }`, máximo 100; `nextCursor = null` ao terminar. O cursor opaco é vinculado à oportunidade e representa o último par `(occurredAt, id)` recebido.
+- `GET /crm/opportunities/:id/interest` — perfil com empreendimento/tipologia resumidos, ou resposta `200` com corpo vazio quando ausente (lida como `null` pelo cliente Angular).
+- `PUT /crm/opportunities/:id/interest` — cria ou substitui integralmente o perfil da oportunidade; campos opcionais omitidos ficam `null`. Repetir o mesmo conteúdo é no-op, sem auditoria adicional.
+- `DELETE /crm/opportunities/:id/interest` — remove o perfil existente sem alterar a oportunidade ou sua unidade; perfil ausente retorna `404`.
+
+O perfil aceita `developmentId`, `unitTypeId`, mínimos/máximos de quartos, área e preço, `availableDownPayment`, `purpose` e `notes`. Quartos são inteiros de 0 a 100, área usa m² com até duas casas decimais (como `Unit.builtArea` e `UnitType.standardArea`), e valores monetários são strings decimais não negativas armazenadas em `Decimal(18,2)`. O backend rejeita faixas invertidas e relacionamentos incompatíveis; observações têm até 2.000 caracteres. Tenant e ator vêm da sessão. Criação, edição e remoção são auditadas na mesma transação, com nomes de campos alterados e IDs seguros, sem copiar texto livre ou preços para o AuditLog. A migration aditiva `20260918010000_opportunity_property_interests` não altera oportunidades existentes; a unicidade de `opportunityId` garante um perfil por oportunidade, e os índices de empreendimento/tipologia também servem às respectivas FKs. Matching e score não existem neste contrato.
 
 - `GET|POST /crm/activities`
 - `PATCH|DELETE /crm/activities/:id`
@@ -117,11 +125,15 @@ Pedir um status fechado junto de `openOnly` é insatisfazível por definição e
 ## Interface (harpia-web)
 
 - `/crm`: Kanban e modo lista, busca, filtros por pipeline/etapa/responsável/empreendimento, drag and drop nativo com modal de confirmação, tempo na etapa, estados de atraso e estagnação, criação, edição e movimentação. O funil consome `GET /crm/board`: cada coluna tem paginação própria e os totais vêm do servidor.
-- `/crm/opportunities/:id`: resumo comercial, histórico de etapas, timeline unificada, **visitas**, reservas, propostas e atividades. Não possui seção de venda. A ação rápida `Agendar visita` fica no cabeçalho, ao lado de `Mover etapa`, `Editar` e `Excluir`. Ver a seção de visitas abaixo.
+- `/crm/opportunities/:id`: resumo comercial, perfil de interesse, histórico de etapas, timeline unificada, **visitas**, reservas, propostas e atividades. Não possui seção de venda. A ação rápida `Agendar visita` fica no cabeçalho, ao lado de `Mover etapa`, `Editar` e `Excluir`. Ver as seções abaixo.
 - `/crm/tasks`: agenda comercial com as visões Hoje, Atrasadas, Próximas, Concluídas e Todas as abertas, filtros por responsável e prioridade, ações de iniciar/concluir e `Carregar mais` por visão. Cada visão é uma consulta própria ao servidor; ver a semântica abaixo.
 - `/crm/visits`: agenda do tenant. Lista paginada com filtros por status, responsável e período; agendamento com busca de oportunidade no servidor, registro de comparecimento com resultado, ausência e cancelamento com motivo. Não permite reagendar nem filtrar por empreendimento. O reagendamento existe apenas dentro da oportunidade.
 
 Todas as telas tratam carregamento, erro com retry e vazio, espelham `CRM_READ`/`CRM_WRITE` e são navegáveis pelo grupo "Comercial" do menu. O backend permanece a autoridade de RBAC.
+
+### Preferências do imóvel no detalhe
+
+O card de preferências carrega independentemente do restante do detalhe e tem estados próprios de loading, erro/retry e vazio. O formulário inline mantém todos os campos opcionais, valida faixas e dinheiro antes de salvar e busca tipologias do empreendimento selecionado; trocar o empreendimento limpa a tipologia anterior. Se ainda não há perfil, empreendimento e tipologia da unidade atual podem ser sugeridos apenas na abertura do formulário. Editar ou remover o perfil nunca muda a unidade selecionada, que aparece separadamente no card. Ações de escrita só aparecem para `CRM_WRITE`; leitores podem consultar o perfil. Não há CTA de unidades compatíveis até CRM-017/019.
 
 ### Visitas no detalhe da oportunidade
 

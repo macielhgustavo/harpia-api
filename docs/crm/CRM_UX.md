@@ -95,7 +95,7 @@ Entrada: R$ 80 mil
 Objetivo: moradia
 ```
 
-CTA: `Ver unidades compatíveis`.
+No detalhe da oportunidade, um card próprio `Preferências do imóvel` mostra esses dados ou um estado vazio com `Adicionar preferências`. Edição e remoção acontecem inline, com confirmação da remoção, loading e retry independentes. Quando existe unidade selecionada, ela é mostrada separadamente das preferências. Empreendimento e tipologia atuais podem ser sugeridos somente na criação do perfil; alterar preferências não troca a unidade. `Ver unidades compatíveis` é CTA futuro de CRM-019 e não é exibido antes de haver matching real.
 
 ## Unidades compatíveis
 

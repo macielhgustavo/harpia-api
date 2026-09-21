@@ -91,7 +91,8 @@ Nenhuma regra cria follow-up após visita.
 
 # Fase E — Inteligência imobiliária
 
-## CRM-015 — Perfil de interesse — **PENDENTE**
+## CRM-015 — Perfil de interesse — **CONCLUÍDO**
+Perfil opcional e único por oportunidade, independente de `unitId`, com empreendimento/tipologia desejados, faixas de quartos/área/preço, entrada, objetivo e observações. API tenant-scoped `GET/PUT/DELETE /crm/opportunities/:id/interest`, validação de faixas e relações, `Decimal(18,2)`, auditoria e card editável no detalhe com leitura para `CRM_READ`. Migration aditiva sem backfill; E2E real cobre o fluxo sem unidade, upsert, remoção, RBAC e isolamento. Matching, score e recomendações permanecem nos itens CRM-017/018/019.
 ## CRM-016 — Fluxo sem unidade — **CONCLUÍDO**
 `Opportunity.unitId` é opcional no schema, nos DTOs e na UI; o aceite de proposta e a venda preenchem a unidade quando ela ainda não existe.
 ## CRM-017 — Match de unidades — **PENDENTE**
@@ -201,4 +202,4 @@ João Silva → Instagram → Residencial Aurora → 2 quartos → até R$ 500 m
 
 Validar timeline, score, health, próxima ação, auditoria, tenancy, RBAC e ausência de duplicidade.
 
-O recorte existente desse cenário agora é também provado em E2E até "reserva → proposta → aceite → venda", com a ressalva de que interesse imobiliário estruturado, unidades compatíveis, score, health e próxima ação ainda não existem. Desde o CRM-FIX-05, todo o trecho de visita — agendar, reagendar, realizar com resultado, registrar ausência e cancelar — é executável sem sair da tela da oportunidade.
+O recorte existente desse cenário agora é também provado em E2E até "reserva → proposta → aceite → venda". O interesse imobiliário estruturado passou a existir no CRM-015; unidades compatíveis, score, health e próxima ação ainda não existem. Desde o CRM-FIX-05, todo o trecho de visita — agendar, reagendar, realizar com resultado, registrar ausência e cancelar — é executável sem sair da tela da oportunidade.
