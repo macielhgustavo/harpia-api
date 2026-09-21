@@ -344,6 +344,8 @@ model Unit {
   salesProposals SalesProposal[]
   sales          Sale[]
   salesVisits    SalesVisit[]
+
+  @@index([organizationId, status, developmentId, unitTypeId])
 }
 
 // ---------------------------------------------------------------------------

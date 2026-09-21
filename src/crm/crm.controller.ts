@@ -26,6 +26,8 @@ import { UpdateOpportunityDto } from './dto/update-opportunity.dto';
 import { UpdateSalesActivityDto } from './dto/update-sales-activity.dto';
 import { UpsertOpportunityPropertyInterestDto } from './dto/upsert-opportunity-property-interest.dto';
 import { OpportunityPropertyInterestsService } from './opportunity-property-interests.service';
+import { UnitMatchesQueryDto } from './dto/unit-matches-query.dto';
+import { UnitMatchingService } from './unit-matching.service';
 
 interface AuthUser {
   id: string;
@@ -38,6 +40,7 @@ export class CrmController {
   constructor(
     private readonly crm: CrmService,
     private readonly propertyInterests: OpportunityPropertyInterestsService,
+    private readonly unitMatching: UnitMatchingService,
   ) {}
 
   @Get('pipelines')
@@ -91,6 +94,15 @@ export class CrmController {
     @CurrentUser() user: AuthUser,
   ) {
     return this.propertyInterests.findOne(id, user.organizationId);
+  }
+
+  @Get('opportunities/:id/unit-matches')
+  findOpportunityUnitMatches(
+    @Param('id') id: string,
+    @CurrentUser() user: AuthUser,
+    @Query() query: UnitMatchesQueryDto,
+  ) {
+    return this.unitMatching.findMatches(id, user.organizationId, query);
   }
 
   @RequirePermissions(PERMISSIONS.CRM_WRITE)

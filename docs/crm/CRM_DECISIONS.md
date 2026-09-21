@@ -98,7 +98,12 @@ Novas frentes grandes fora do CRM exigem justificativa forte até o CRM atingir 
 ## ADR-021 — Preferências não são a unidade selecionada
 **Status:** APROVADO
 
-`OpportunityPropertyInterest` é opcional e único por oportunidade. Guarda a intenção atual do cliente sem derivar nem atualizar `Opportunity.unitId`; referências a empreendimento e tipologia são opcionais e validadas no tenant, e a tipologia deve pertencer ao empreendimento escolhido. O `PUT` substitui o perfil inteiro e não cria versões históricas; mudanças são rastreadas no AuditLog com metadados mínimos. Dinheiro usa `Decimal(18,2)`, área segue os m² decimais de Unit/UnitType, e o objetivo usa quatro valores estáveis. A tabela é aditiva e não requer backfill. CRM-017 poderá consultar o perfil, mas não há matching, score ou recomendação nesta decisão.
+`OpportunityPropertyInterest` é opcional e único por oportunidade. Guarda a intenção atual do cliente sem derivar nem atualizar `Opportunity.unitId`; referências a empreendimento e tipologia são opcionais e validadas no tenant, e a tipologia deve pertencer ao empreendimento escolhido. O `PUT` substitui o perfil inteiro e não cria versões históricas; mudanças são rastreadas no AuditLog com metadados mínimos. Dinheiro usa `Decimal(18,2)`, área segue os m² decimais de Unit/UnitType, e o objetivo usa quatro valores estáveis. A tabela é aditiva e não requer backfill. O matching básico posterior está descrito na ADR-022; não altera esta independência.
+
+## ADR-022 — Matching começa com candidatos e critérios, não score opaco
+**Status:** APROVADO
+
+`UnitMatchingService` usa o perfil atual e consulta estoque/preço em tempo real. Tenant, disponibilidade, empreendimento/tipologia explícitos e preço em tabela ativa são filtros rígidos. Quartos, área e faixa de preço são critérios suaves com estados estruturados; entrada e objetivo são `NOT_EVALUATED` até existir dado objetivo no estoque. Entre várias tabelas ativas, vence `UnitPrice.updatedAt DESC, id DESC`, como nas propostas. Preço dentro da faixa precede contagem de critérios suaves, incompatibilidades, desvio monetário e chaves estáveis. Não há score 0–100, seleção automática nem mutação da oportunidade. CRM-018 poderá definir pesos/score sem reescrever o universo de candidatos.
 
 # Template
 

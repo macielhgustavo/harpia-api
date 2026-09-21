@@ -95,7 +95,7 @@ Entrada: R$ 80 mil
 Objetivo: moradia
 ```
 
-No detalhe da oportunidade, um card próprio `Preferências do imóvel` mostra esses dados ou um estado vazio com `Adicionar preferências`. Edição e remoção acontecem inline, com confirmação da remoção, loading e retry independentes. Quando existe unidade selecionada, ela é mostrada separadamente das preferências. Empreendimento e tipologia atuais podem ser sugeridos somente na criação do perfil; alterar preferências não troca a unidade. `Ver unidades compatíveis` é CTA futuro de CRM-019 e não é exibido antes de haver matching real.
+No detalhe da oportunidade, um card próprio `Preferências do imóvel` mostra esses dados ou um estado vazio com `Adicionar preferências`. Edição e remoção acontecem inline, com confirmação da remoção, loading e retry independentes. Quando existe unidade selecionada, ela é mostrada separadamente das preferências. Empreendimento e tipologia atuais podem ser sugeridos somente na criação do perfil; alterar preferências não troca a unidade. Com perfil, o CTA `Ver unidades compatíveis` abre resultados no próprio card, inclusive para `CRM_READ`: unidade, empreendimento, tipologia, preço, disponibilidade, contagem e critérios explicados, com paginação, retry e destaque da unidade já selecionada. O empty state orienta o usuário a cadastrar preferências antes da busca. CRM-019 permanece responsável pelo polish completo.
 
 ## Unidades compatíveis
 
