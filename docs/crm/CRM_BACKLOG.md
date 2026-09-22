@@ -92,14 +92,15 @@ Nenhuma regra cria follow-up após visita.
 # Fase E — Inteligência imobiliária
 
 ## CRM-015 — Perfil de interesse — **CONCLUÍDO**
-Perfil opcional e único por oportunidade, independente de `unitId`, com empreendimento/tipologia desejados, faixas de quartos/área/preço, entrada, objetivo e observações. API tenant-scoped `GET/PUT/DELETE /crm/opportunities/:id/interest`, validação de faixas e relações, `Decimal(18,2)`, auditoria e card editável no detalhe com leitura para `CRM_READ`. Migration aditiva sem backfill; E2E real cobre o fluxo sem unidade, upsert, remoção, RBAC e isolamento. Matching e score foram concluídos em CRM-017/018; UX final permanece em CRM-019.
+Perfil opcional e único por oportunidade, independente de `unitId`, com empreendimento/tipologia desejados, faixas de quartos/área/preço, entrada, objetivo e observações. API tenant-scoped `GET/PUT/DELETE /crm/opportunities/:id/interest`, validação de faixas e relações, `Decimal(18,2)`, auditoria e card editável no detalhe com leitura para `CRM_READ`. Migration aditiva sem backfill; E2E real cobre o fluxo sem unidade, upsert, remoção, RBAC e isolamento. Matching, score e UX foram concluídos em CRM-017/018/019.
 ## CRM-016 — Fluxo sem unidade — **CONCLUÍDO**
 `Opportunity.unitId` é opcional no schema, nos DTOs e na UI; o aceite de proposta e a venda preenchem a unidade quando ela ainda não existe.
 ## CRM-017 — Match de unidades — **CONCLUÍDO**
 Motor determinístico e explicável em `GET /crm/opportunities/:id/unit-matches`, com filtros rígidos de tenant/disponibilidade/empreendimento/tipologia, critérios suaves de quartos/área/preço, tabela ativa mais recente, paginação 20/100, ordenação total e status `NOT_EVALUATED` para entrada/objetivo sem dados objetivos. O detalhe permite consultar e paginar sem selecionar unidade automaticamente. Índice aditivo de candidatos e E2E PostgreSQL real. Nesta fase não havia score percentual, IA ou automações; o score posterior é CRM-018.
 ## CRM-018 — Score de compatibilidade — **CONCLUÍDO**
 Pesos fixos e explicáveis (preço 50, área 25, quartos 25), degradação gradual para preço/área e discreta para quartos, normalização apenas sobre critérios avaliáveis e `null` quando nenhum existe. O endpoint do CRM-017 agora retorna score, nível e fatores, ordena globalmente antes da página e preserva desempate determinístico e hard filters. A interface funcional apresenta percentual, nível e cálculo expansível sem redesign CRM-019. Sem IA, lead score, health ou bônus para unidade selecionada; sem schema/migration nova. Fórmulas e contrato em `docs/crm.md` e ADR-023.
-## CRM-019 — UI de unidades compatíveis — **PENDENTE**
+## CRM-019 — UI de unidades compatíveis — **CONCLUÍDO**
+Cards responsivos no detalhe priorizam score/nivel, preço e até três razões; cálculo completo permanece expansível. Seleção via PATCH tenant-scoped valida novamente disponibilidade, preço ativo e empreendimento; troca de unidade exige confirmação, conflito `409` atualiza sugestões sem alterar a oportunidade. Link à lista existente de unidades filtrada pelo identificador e atalhos manuais para reservas/propostas. Perfil alterado recarrega a primeira página, carregamento adicional deduplica IDs e não reordena páginas localmente. Sem seleção, reserva ou proposta automática; sem filtros locais parciais. Nenhuma migration ou alteração do scorer.
 
 # Fase F — Organização comercial
 

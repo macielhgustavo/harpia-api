@@ -135,6 +135,98 @@ describe('CrmService', () => {
     expect(tx.opportunity.create).not.toHaveBeenCalled();
   });
 
+  describe('selecting a unit on an opportunity', () => {
+    const current = {
+      id: 'opportunity-1',
+      personId: 'person-1',
+      pipelineId: 'pipeline-1',
+      stageId: 'stage-1',
+      assignedUserId: null,
+      developmentId: null,
+      unitId: null,
+    };
+
+    beforeEach(() => {
+      tx.person.findFirst.mockResolvedValue({ id: 'person-1' });
+      tx.unit.findFirst.mockResolvedValue({
+        id: 'unit-1',
+        developmentId: 'development-1',
+      });
+      tx.opportunity.update.mockResolvedValue({
+        id: 'opportunity-1',
+        unitId: 'unit-1',
+      });
+    });
+
+    it('accepts a newly available tenant unit and writes the linked development', async () => {
+      tx.$queryRaw
+        .mockResolvedValueOnce([{ selectable: true }])
+        .mockResolvedValueOnce([current]);
+      await service.updateOpportunity('opportunity-1', actor, {
+        developmentId: 'development-1',
+        unitId: 'unit-1',
+      });
+      expect(tx.opportunity.update).toHaveBeenCalledWith(
+        expect.objectContaining({
+          data: expect.objectContaining({
+            developmentId: 'development-1',
+            unitId: 'unit-1',
+          }),
+        }),
+      );
+      expect(tx.unit.findFirst).toHaveBeenCalledWith({
+        where: { id: 'unit-1', organizationId: 'org-a' },
+        select: { id: true, developmentId: true },
+      });
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(2);
+    });
+
+    it('rejects a unit that became unavailable without updating the opportunity', async () => {
+      tx.$queryRaw
+        .mockResolvedValueOnce([{ selectable: false }])
+        .mockResolvedValueOnce([current]);
+      await expect(
+        service.updateOpportunity('opportunity-1', actor, { unitId: 'unit-1' }),
+      ).rejects.toThrow('Unidade não está mais disponível');
+      expect(tx.opportunity.update).not.toHaveBeenCalled();
+    });
+
+    it('rejects a unit outside the tenant', async () => {
+      tx.$queryRaw.mockResolvedValueOnce([]).mockResolvedValueOnce([current]);
+      await expect(
+        service.updateOpportunity('opportunity-1', actor, {
+          unitId: 'foreign-unit',
+        }),
+      ).rejects.toThrow('Unidade inválida');
+      expect(tx.opportunity.update).not.toHaveBeenCalled();
+    });
+
+    it('does not revalidate an already selected unit on an unrelated edit', async () => {
+      tx.$queryRaw.mockResolvedValueOnce([
+        { ...current, unitId: 'unit-1', developmentId: 'development-1' },
+      ]);
+      await service.updateOpportunity('opportunity-1', actor, {
+        notes: 'Retorno',
+      });
+      expect(tx.$queryRaw).toHaveBeenCalledTimes(1);
+      expect(tx.opportunity.update).toHaveBeenCalled();
+    });
+
+    it('allows an explicitly unchanged selected unit even if its stock changed', async () => {
+      tx.$queryRaw
+        .mockResolvedValueOnce([{ selectable: false }])
+        .mockResolvedValueOnce([
+          { ...current, unitId: 'unit-1', developmentId: 'development-1' },
+        ]);
+      await service.updateOpportunity('opportunity-1', actor, {
+        developmentId: 'development-1',
+        unitId: 'unit-1',
+        notes: 'Retorno',
+      });
+      expect(tx.opportunity.update).toHaveBeenCalled();
+    });
+  });
+
   it('moves an opportunity, persists history, and audits a win', async () => {
     tx.$queryRaw.mockResolvedValue([
       {

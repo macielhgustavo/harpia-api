@@ -466,6 +466,15 @@ export class CrmService {
     dto: UpdateOpportunityDto,
   ) {
     return this.prisma.$transaction(async (tx) => {
+      // Other commercial writers lock Unit before touching Opportunity.
+      // Keep the same order to avoid a lock cycle on concurrent sales.
+      const selectable = dto.unitId
+        ? await this.lockUnitSelectionAvailability(
+            tx,
+            dto.unitId,
+            actor.organizationId,
+          )
+        : null;
       const current = await this.lockOpportunity(tx, id, actor.organizationId);
       const personId = dto.personId ?? current.personId;
       const person = await this.assertPerson(
@@ -480,6 +489,12 @@ export class CrmService {
           : (dto.assignedUserId ?? undefined),
         actor.organizationId,
       );
+      if (dto.unitId && dto.unitId !== current.unitId) {
+        if (selectable === null)
+          throw new BadRequestException('Unidade inválida');
+        if (!selectable)
+          throw new ConflictException('Unidade não está mais disponível');
+      }
       const target = await this.resolveSalesTarget(
         tx,
         actor.organizationId,
@@ -1121,6 +1136,49 @@ export class CrmService {
         throw new BadRequestException('Empreendimento inválido');
     }
     return { developmentId, unitId: null };
+  }
+
+  private async lockUnitSelectionAvailability(
+    tx: Prisma.TransactionClient,
+    unitId: string,
+    organizationId: string,
+  ): Promise<boolean | null> {
+    // Reservation and sale writers lock the same unit row before changing it.
+    // Locking here makes the availability check authoritative at selection time.
+    const rows = await tx.$queryRaw<{ selectable: boolean }[]>`
+      SELECT (
+        u."status" = 'DISPONIVEL'
+        AND EXISTS (
+          SELECT 1 FROM "Development" d
+          WHERE d."id" = u."developmentId"
+            AND d."organizationId" = ${organizationId}
+            AND d."status" <> 'CANCELADO'
+        )
+        AND EXISTS (
+          SELECT 1 FROM "UnitPrice" up
+          JOIN "PriceTable" pt ON pt."id" = up."priceTableId"
+            AND pt."organizationId" = ${organizationId}
+            AND pt."developmentId" = u."developmentId"
+            AND pt."active" = true
+          WHERE up."organizationId" = ${organizationId}
+            AND up."unitId" = u."id"
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "UnitReservation" r
+          WHERE r."organizationId" = ${organizationId}
+            AND r."unitId" = u."id" AND r."status" = 'ATIVA'
+        )
+        AND NOT EXISTS (
+          SELECT 1 FROM "Sale" s
+          WHERE s."organizationId" = ${organizationId}
+            AND s."unitId" = u."id" AND s."status" IN ('ATIVA', 'QUITADA')
+        )
+      ) AS "selectable"
+      FROM "Unit" u
+      WHERE u."id" = ${unitId} AND u."organizationId" = ${organizationId}
+      FOR UPDATE OF u
+    `;
+    return rows[0]?.selectable ?? null;
   }
 
   private async lockOpportunity(

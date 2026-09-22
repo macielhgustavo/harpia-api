@@ -129,6 +129,74 @@ describe('CRM unit matching (e2e)', () => {
     );
   });
 
+  it('selects the best match without changing the profile, score, or creating a reservation', async () => {
+    const before = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}/unit-matches`)
+      .set('Authorization', bearer(token))
+      .expect(200);
+    const best = before.body.data[0];
+    const profileBefore = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}/interest`)
+      .set('Authorization', bearer(token))
+      .expect(200);
+    await request(app.getHttpServer())
+      .patch(`/crm/opportunities/${opportunityId}`)
+      .set('Authorization', bearer(token))
+      .send({ developmentId: best.development.id, unitId: best.unit.id })
+      .expect(200);
+    const opportunity = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}`)
+      .set('Authorization', bearer(token))
+      .expect(200);
+    expect(opportunity.body.unitId).toBe(best.unit.id);
+    expect(opportunity.body.developmentId).toBe(best.development.id);
+    const profileAfter = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}/interest`)
+      .set('Authorization', bearer(token))
+      .expect(200);
+    expect(profileAfter.body).toEqual(profileBefore.body);
+    const after = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}/unit-matches`)
+      .set('Authorization', bearer(token))
+      .expect(200);
+    const selected = after.body.data.find(
+      (item) => item.unit.id === best.unit.id,
+    );
+    expect(selected.unit.isSelected).toBe(true);
+    expect(selected.compatibilityScore).toBe(best.compatibilityScore);
+    expect(after.body.data.map((item) => item.unit.id)).toEqual(
+      before.body.data.map((item) => item.unit.id),
+    );
+    expect(
+      await prisma.unitReservation.count({
+        where: { opportunityId, organizationId: fixture.organization.id },
+      }),
+    ).toBe(0);
+  });
+
+  it('rejects stale unavailable stock and cross-tenant units without changing selection', async () => {
+    const before = await prisma.opportunity.findUniqueOrThrow({
+      where: { id: opportunityId },
+    });
+    await request(app.getHttpServer())
+      .patch(`/crm/opportunities/${opportunityId}`)
+      .set('Authorization', bearer(token))
+      .send({
+        developmentId: fixture.development.id,
+        unitId: fixture.units[4].id,
+      })
+      .expect(409);
+    await request(app.getHttpServer())
+      .patch(`/crm/opportunities/${opportunityId}`)
+      .set('Authorization', bearer(token))
+      .send({ unitId: other.units[0].id })
+      .expect(400);
+    const after = await prisma.opportunity.findUniqueOrThrow({
+      where: { id: opportunityId },
+    });
+    expect(after.unitId).toBe(before.unitId);
+  });
+
   it('keeps bedroom and area mismatches visible with their structured status', async () => {
     const differentType = await prisma.unitType.create({
       data: {
@@ -243,6 +311,22 @@ describe('CRM unit matching (e2e)', () => {
     expect(result.body.data.map((item) => item.unit.id)).not.toContain(
       fixture.units[2].id,
     );
+    await request(app.getHttpServer())
+      .patch(`/crm/opportunities/${opportunityId}`)
+      .set('Authorization', bearer(token))
+      .send({
+        developmentId: fixture.development.id,
+        unitId: fixture.units[1].id,
+      })
+      .expect(409);
+    await request(app.getHttpServer())
+      .patch(`/crm/opportunities/${opportunityId}`)
+      .set('Authorization', bearer(token))
+      .send({
+        developmentId: fixture.development.id,
+        unitId: fixture.units[2].id,
+      })
+      .expect(409);
   });
 
   it('uses the latest active table, excludes units without price, and rejects invalid pagination', async () => {
