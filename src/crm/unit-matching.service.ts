@@ -3,6 +3,10 @@ import { Prisma } from '@prisma/client';
 import { PrismaService } from '../prisma/prisma.service';
 import { UnitMatchesQueryDto } from './dto/unit-matches-query.dto';
 import { MatchRow, presentUnitMatch } from './unit-matching';
+import {
+  COMPATIBILITY_DEVIATION_MULTIPLIERS,
+  COMPATIBILITY_WEIGHTS,
+} from './unit-compatibility-score';
 
 @Injectable()
 export class UnitMatchingService {
@@ -130,12 +134,62 @@ export class UnitMatchingService {
               THEN e."price" - ${interest.maxPrice}::numeric
             ELSE 0::numeric END AS "priceDeviation"
         FROM evaluated e
+      ), scored AS (
+        SELECT r.*,
+          CASE WHEN r."priceMatch" IS NULL THEN NULL
+            WHEN r."priceMatch" THEN 100
+            ELSE COALESCE(GREATEST(0, ROUND(100 - r."priceDeviation" * ${COMPATIBILITY_DEVIATION_MULTIPLIERS.PRICE} /
+              NULLIF(CASE WHEN ${interest.minPrice}::numeric IS NOT NULL
+                AND r."price" < ${interest.minPrice}::numeric
+                THEN ${interest.minPrice}::numeric
+                ELSE ${interest.maxPrice}::numeric END, 0), 0))::integer, 0)
+          END AS "priceCriterionScore",
+          CASE WHEN r."areaMatch" IS NULL THEN NULL
+            WHEN r."areaMatch" THEN 100
+            ELSE COALESCE(GREATEST(0, ROUND(100 - ABS(r."area" -
+              CASE WHEN ${interest.minArea}::numeric IS NOT NULL
+                AND r."area" < ${interest.minArea}::numeric
+                THEN ${interest.minArea}::numeric
+                ELSE ${interest.maxArea}::numeric END) * ${COMPATIBILITY_DEVIATION_MULTIPLIERS.AREA} /
+              NULLIF(CASE WHEN ${interest.minArea}::numeric IS NOT NULL
+                AND r."area" < ${interest.minArea}::numeric
+                THEN ${interest.minArea}::numeric
+                ELSE ${interest.maxArea}::numeric END, 0), 0))::integer, 0)
+          END AS "areaCriterionScore",
+          CASE WHEN r."bedroomsMatch" IS NULL THEN NULL
+            WHEN r."bedroomsMatch" THEN 100
+            ELSE GREATEST(0, 100 - 50 *
+              CASE WHEN ${interest.minBedrooms}::integer IS NOT NULL
+                AND r."bedrooms" < ${interest.minBedrooms}::integer
+                THEN ${interest.minBedrooms}::integer - r."bedrooms"
+                ELSE r."bedrooms" - ${interest.maxBedrooms}::integer END)
+          END AS "bedroomsCriterionScore"
+        FROM ranked r
+      ), weighted AS (
+        SELECT s.*,
+          CASE WHEN
+            (CASE WHEN s."priceCriterionScore" IS NULL THEN 0 ELSE ${COMPATIBILITY_WEIGHTS.PRICE} END
+            + CASE WHEN s."areaCriterionScore" IS NULL THEN 0 ELSE ${COMPATIBILITY_WEIGHTS.AREA} END
+            + CASE WHEN s."bedroomsCriterionScore" IS NULL THEN 0 ELSE ${COMPATIBILITY_WEIGHTS.BEDROOMS} END) = 0
+            THEN NULL
+            ELSE ROUND((
+              COALESCE(s."priceCriterionScore", 0) * ${COMPATIBILITY_WEIGHTS.PRICE}
+              + COALESCE(s."areaCriterionScore", 0) * ${COMPATIBILITY_WEIGHTS.AREA}
+              + COALESCE(s."bedroomsCriterionScore", 0) * ${COMPATIBILITY_WEIGHTS.BEDROOMS}
+            )::numeric / (
+              CASE WHEN s."priceCriterionScore" IS NULL THEN 0 ELSE ${COMPATIBILITY_WEIGHTS.PRICE} END
+              + CASE WHEN s."areaCriterionScore" IS NULL THEN 0 ELSE ${COMPATIBILITY_WEIGHTS.AREA} END
+              + CASE WHEN s."bedroomsCriterionScore" IS NULL THEN 0 ELSE ${COMPATIBILITY_WEIGHTS.BEDROOMS} END
+            ), 0)::integer
+          END AS "compatibilityScore"
+        FROM scored s
       )
       SELECT totals."total", page.*
-      FROM (SELECT COUNT(*) AS "total" FROM ranked) totals
+      FROM (SELECT COUNT(*) AS "total" FROM weighted) totals
       LEFT JOIN LATERAL (
-        SELECT * FROM ranked
-        ORDER BY ("priceMatch" IS FALSE) ASC,
+        SELECT * FROM weighted
+        ORDER BY "compatibilityScore" DESC NULLS LAST,
+          ("priceMatch" IS FALSE) ASC,
           "matchedSoft" DESC, "mismatchedSoft" ASC,
           "priceDeviation" ASC, "identifier" COLLATE "C" ASC,
           "developmentId" ASC, "id" ASC

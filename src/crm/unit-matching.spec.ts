@@ -32,6 +32,7 @@ const row: MatchRow = {
   matchedSoft: 3,
   mismatchedSoft: 0,
   priceDeviation: new Prisma.Decimal('0.00'),
+  compatibilityScore: 100,
 };
 
 describe('presentUnitMatch', () => {
@@ -80,6 +81,7 @@ describe('presentUnitMatch', () => {
           matchedSoft: 2,
           mismatchedSoft: 1,
           priceDeviation: new Prisma.Decimal(deviation),
+          compatibilityScore: price === '515000.00' ? 85 : 84,
         },
         interest,
         null,
@@ -138,6 +140,7 @@ describe('presentUnitMatch', () => {
         areaMatch: null,
         priceMatch: null,
         matchedSoft: 0,
+        compatibilityScore: null,
       },
       partial,
       null,

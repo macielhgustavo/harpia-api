@@ -380,6 +380,141 @@ describe('CRM unit matching (e2e)', () => {
     );
   });
 
+  it('scores globally before pagination, explains partial matches, and never boosts the selected unit', async () => {
+    const [ideal, partial] = await Promise.all([
+      prisma.unit.create({
+        data: {
+          organizationId: fixture.organization.id,
+          developmentId: fixture.development.id,
+          unitTypeId: fixture.unitType.id,
+          identifier: 'SCORE-A',
+          category: 'APARTAMENTO',
+          status: 'DISPONIVEL',
+          builtArea: 80,
+        },
+      }),
+      prisma.unit.create({
+        data: {
+          organizationId: fixture.organization.id,
+          developmentId: fixture.development.id,
+          unitTypeId: fixture.unitType.id,
+          identifier: 'SCORE-B',
+          category: 'APARTAMENTO',
+          status: 'DISPONIVEL',
+          builtArea: 65,
+        },
+      }),
+    ]);
+    await prisma.unitPrice.createMany({
+      data: [
+        {
+          organizationId: fixture.organization.id,
+          unitId: ideal.id,
+          priceTableId: fixture.priceTable.id,
+          value: 490000,
+        },
+        {
+          organizationId: fixture.organization.id,
+          unitId: partial.id,
+          priceTableId: fixture.priceTable.id,
+          value: 510000,
+        },
+      ],
+    });
+    await prisma.opportunityPropertyInterest.update({
+      where: { opportunityId },
+      data: {
+        developmentId: fixture.development.id,
+        unitTypeId: fixture.unitType.id,
+        minBedrooms: 2,
+        maxBedrooms: 2,
+        minArea: 70,
+        maxArea: 90,
+        minPrice: null,
+        maxPrice: '500000.00',
+      },
+    });
+    await prisma.opportunity.update({
+      where: { id: opportunityId },
+      data: { unitId: partial.id },
+    });
+    const first = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}/unit-matches?page=1&pageSize=1`)
+      .set('Authorization', bearer(readerToken))
+      .expect(200);
+    const all = [...first.body.data];
+    for (let page = 2; page <= first.body.pagination.totalPages; page++) {
+      const response = await request(app.getHttpServer())
+        .get(
+          `/crm/opportunities/${opportunityId}/unit-matches?page=${page}&pageSize=1`,
+        )
+        .set('Authorization', bearer(readerToken))
+        .expect(200);
+      all.push(...response.body.data);
+    }
+    expect(new Set(all.map((item) => item.unit.id)).size).toBe(
+      first.body.pagination.total,
+    );
+    expect(all.map((item) => item.compatibilityScore)).toEqual(
+      [...all.map((item) => item.compatibilityScore)].sort((a, b) => b - a),
+    );
+    const idealResult = all.find((item) => item.unit.id === ideal.id);
+    const partialResult = all.find((item) => item.unit.id === partial.id);
+    expect(idealResult).toMatchObject({
+      compatibilityScore: 100,
+      compatibilityLevel: 'EXCELENTE',
+    });
+    expect(partialResult.compatibilityScore).toBeLessThan(
+      idealResult.compatibilityScore,
+    );
+    expect(partialResult.unit.isSelected).toBe(true);
+    expect(partialResult.scoreFactors).toEqual(
+      expect.arrayContaining([
+        expect.objectContaining({
+          criterion: 'PRICE',
+          criterionScore: 80,
+          status: 'MISMATCH',
+        }),
+        expect.objectContaining({ criterion: 'AREA', status: 'MISMATCH' }),
+      ]),
+    );
+    await prisma.opportunity.update({
+      where: { id: opportunityId },
+      data: { unitId: ideal.id },
+    });
+    const afterSelection = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}/unit-matches?pageSize=10`)
+      .set('Authorization', bearer(readerToken))
+      .expect(200);
+    expect(
+      afterSelection.body.data.map((item) => [
+        item.unit.id,
+        item.compatibilityScore,
+      ]),
+    ).toEqual(all.map((item) => [item.unit.id, item.compatibilityScore]));
+
+    await prisma.opportunityPropertyInterest.update({
+      where: { opportunityId },
+      data: {
+        minBedrooms: null,
+        maxBedrooms: null,
+        minArea: null,
+        maxArea: null,
+        minPrice: null,
+        maxPrice: null,
+      },
+    });
+    const unevaluated = await request(app.getHttpServer())
+      .get(`/crm/opportunities/${opportunityId}/unit-matches?pageSize=10`)
+      .set('Authorization', bearer(readerToken))
+      .expect(200);
+    expect(unevaluated.body.data[0]).toMatchObject({
+      compatibilityScore: null,
+      compatibilityLevel: 'NOT_EVALUATED',
+      evaluatedWeight: 0,
+    });
+  });
+
   it('requires CRM_READ even for a valid user', async () => {
     const finance = await prisma.user.create({
       data: {

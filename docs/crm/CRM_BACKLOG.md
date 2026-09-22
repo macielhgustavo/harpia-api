@@ -92,12 +92,13 @@ Nenhuma regra cria follow-up após visita.
 # Fase E — Inteligência imobiliária
 
 ## CRM-015 — Perfil de interesse — **CONCLUÍDO**
-Perfil opcional e único por oportunidade, independente de `unitId`, com empreendimento/tipologia desejados, faixas de quartos/área/preço, entrada, objetivo e observações. API tenant-scoped `GET/PUT/DELETE /crm/opportunities/:id/interest`, validação de faixas e relações, `Decimal(18,2)`, auditoria e card editável no detalhe com leitura para `CRM_READ`. Migration aditiva sem backfill; E2E real cobre o fluxo sem unidade, upsert, remoção, RBAC e isolamento. O matching básico foi concluído no CRM-017; score e UX final permanecem em CRM-018/019.
+Perfil opcional e único por oportunidade, independente de `unitId`, com empreendimento/tipologia desejados, faixas de quartos/área/preço, entrada, objetivo e observações. API tenant-scoped `GET/PUT/DELETE /crm/opportunities/:id/interest`, validação de faixas e relações, `Decimal(18,2)`, auditoria e card editável no detalhe com leitura para `CRM_READ`. Migration aditiva sem backfill; E2E real cobre o fluxo sem unidade, upsert, remoção, RBAC e isolamento. Matching e score foram concluídos em CRM-017/018; UX final permanece em CRM-019.
 ## CRM-016 — Fluxo sem unidade — **CONCLUÍDO**
 `Opportunity.unitId` é opcional no schema, nos DTOs e na UI; o aceite de proposta e a venda preenchem a unidade quando ela ainda não existe.
 ## CRM-017 — Match de unidades — **CONCLUÍDO**
-Motor determinístico e explicável em `GET /crm/opportunities/:id/unit-matches`, com filtros rígidos de tenant/disponibilidade/empreendimento/tipologia, critérios suaves de quartos/área/preço, tabela ativa mais recente, paginação 20/100, ordenação total e status `NOT_EVALUATED` para entrada/objetivo sem dados objetivos. O detalhe permite consultar e paginar sem selecionar unidade automaticamente. Índice aditivo de candidatos e E2E PostgreSQL real. Sem score percentual, IA ou automações.
-## CRM-018 — Score de compatibilidade — **PENDENTE**
+Motor determinístico e explicável em `GET /crm/opportunities/:id/unit-matches`, com filtros rígidos de tenant/disponibilidade/empreendimento/tipologia, critérios suaves de quartos/área/preço, tabela ativa mais recente, paginação 20/100, ordenação total e status `NOT_EVALUATED` para entrada/objetivo sem dados objetivos. O detalhe permite consultar e paginar sem selecionar unidade automaticamente. Índice aditivo de candidatos e E2E PostgreSQL real. Nesta fase não havia score percentual, IA ou automações; o score posterior é CRM-018.
+## CRM-018 — Score de compatibilidade — **CONCLUÍDO**
+Pesos fixos e explicáveis (preço 50, área 25, quartos 25), degradação gradual para preço/área e discreta para quartos, normalização apenas sobre critérios avaliáveis e `null` quando nenhum existe. O endpoint do CRM-017 agora retorna score, nível e fatores, ordena globalmente antes da página e preserva desempate determinístico e hard filters. A interface funcional apresenta percentual, nível e cálculo expansível sem redesign CRM-019. Sem IA, lead score, health ou bônus para unidade selecionada; sem schema/migration nova. Fórmulas e contrato em `docs/crm.md` e ADR-023.
 ## CRM-019 — UI de unidades compatíveis — **PENDENTE**
 
 # Fase F — Organização comercial
@@ -157,7 +158,7 @@ Existe motor de automação apenas para cobrança (`collections-automation.servi
 
 Resolvido em 2026-09-18 no backend. `npm run test:e2e` agora sobe PostgreSQL descartável (Docker por padrão ou cluster nativo opcional), protege explicitamente o destino, recria apenas o schema do banco identificado como teste, aplica as 24 migrations reais com `prisma migrate deploy` e executa três specs serializados. O caminho HTTP autenticado cobre pessoa → oportunidade → atividade → visita → unidade → reserva → proposta → aceite → venda, timeline cursorada, histórico, Decimal, recebíveis, CRM-FIX-01 e CRM-FIX-06. Há casos separados de tenancy, RBAC `LEITURA`, reserva concorrente e rollback de uma conversão em venda que falha após tentar ganhar a oportunidade. Instruções reproduzíveis em `README.md`; detalhes em `docs/crm-master-audit.md`.
 
-**Limites conscientes do CRM-052:** catálogo imobiliário e credenciais são factories de setup, não repetição E2E de CRUD alheio ao ciclo; browser E2E continua evolução futura. Naquela fase, score, health, matching e próxima ação não foram simulados. Matching passou a ter E2E próprio no CRM-017; score, health e próxima ação continuam pendentes.
+**Limites conscientes do CRM-052:** catálogo imobiliário e credenciais são factories de setup, não repetição E2E de CRUD alheio ao ciclo; browser E2E continua evolução futura. Naquela fase, score, health, matching e próxima ação não foram simulados. Matching e score passaram a ter E2E próprio no CRM-017/018; health e próxima ação continuam pendentes.
 
 # Correções pendentes levantadas pela re-auditoria
 
@@ -203,4 +204,4 @@ João Silva → Instagram → Residencial Aurora → 2 quartos → até R$ 500 m
 
 Validar timeline, score, health, próxima ação, auditoria, tenancy, RBAC e ausência de duplicidade.
 
-O recorte existente desse cenário agora é também provado em E2E até "reserva → proposta → aceite → venda". O interesse imobiliário estruturado passou a existir no CRM-015 e unidades compatíveis determinísticas no CRM-017; score, health e próxima ação ainda não existem. Desde o CRM-FIX-05, todo o trecho de visita — agendar, reagendar, realizar com resultado, registrar ausência e cancelar — é executável sem sair da tela da oportunidade.
+O recorte existente desse cenário agora é também provado em E2E até "reserva → proposta → aceite → venda". O interesse imobiliário estruturado passou a existir no CRM-015, unidades compatíveis determinísticas no CRM-017 e score de compatibilidade no CRM-018; health e próxima ação ainda não existem. Desde o CRM-FIX-05, todo o trecho de visita — agendar, reagendar, realizar com resultado, registrar ausência e cancelar — é executável sem sair da tela da oportunidade.

@@ -1,4 +1,5 @@
 import { Prisma, PropertyInterestPurpose } from '@prisma/client';
+import { scoreUnitCompatibility } from './unit-compatibility-score';
 
 export interface MatchInterest {
   developmentId: string | null;
@@ -32,6 +33,7 @@ export interface MatchRow {
   matchedSoft: number | null;
   mismatchedSoft: number | null;
   priceDeviation: Prisma.Decimal | null;
+  compatibilityScore: number | null;
 }
 
 export type CriterionStatus = 'MATCH' | 'MISMATCH' | 'NOT_EVALUATED';
@@ -190,6 +192,10 @@ export function presentUnitMatch(
   const notEvaluated = criteria.filter(
     (item) => item.status === 'NOT_EVALUATED',
   ).length;
+  const scoring = scoreUnitCompatibility(interest, row, criteria);
+  if (row.compatibilityScore !== scoring.compatibilityScore) {
+    throw new Error('Score de compatibilidade divergente da ordenação');
+  }
   return {
     unit: {
       id: row.id,
@@ -212,6 +218,7 @@ export function presentUnitMatch(
       mismatched,
       notEvaluated,
     },
+    ...scoring,
     ranking: {
       priceWithinRange: row.priceMatch,
       matchedSoft: row.matchedSoft ?? 0,

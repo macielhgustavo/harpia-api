@@ -105,6 +105,13 @@ Novas frentes grandes fora do CRM exigem justificativa forte até o CRM atingir 
 
 `UnitMatchingService` usa o perfil atual e consulta estoque/preço em tempo real. Tenant, disponibilidade, empreendimento/tipologia explícitos e preço em tabela ativa são filtros rígidos. Quartos, área e faixa de preço são critérios suaves com estados estruturados; entrada e objetivo são `NOT_EVALUATED` até existir dado objetivo no estoque. Entre várias tabelas ativas, vence `UnitPrice.updatedAt DESC, id DESC`, como nas propostas. Preço dentro da faixa precede contagem de critérios suaves, incompatibilidades, desvio monetário e chaves estáveis. Não há score 0–100, seleção automática nem mutação da oportunidade. CRM-018 poderá definir pesos/score sem reescrever o universo de candidatos.
 
+O trecho sobre ausência de score e precedência primária de preço registra o estado do CRM-017. O CRM-018 acrescentou score e o colocou antes desses desempates sem alterar candidatos; ver ADR-023.
+
+## ADR-023 — Score de compatibilidade somente sobre critérios avaliáveis
+**Status:** APROVADO
+
+O matcher do CRM-017 continua responsável por candidatos, filtros rígidos e critérios estruturados. A função pura de scoring usa apenas preço (peso 50), área (25) e quartos (25); orçamento tem maior peso por limitar a viabilidade comercial, sem classificar intenção de compra. Dentro da faixa: 100; preço fora perde 10 pontos por 1% de distância ao limite violado (zera em 10%); área perde 5 pontos por 1% (zera em 20%); quartos perdem 50 por unidade de distância. Critérios ausentes/sem atributo são removidos do denominador. Sem nenhum avaliável, retorna `null/NOT_EVALUATED`. Resultado usa média ponderada arredondada para inteiro e faixas `EXCELENTE` 90–100, `ALTA` 75–89, `MODERADA` 50–74, `BAIXA` 0–49. O SQL parametrizado calcula score para ordenação global antes da página, com pesos importados da mesma constante; a função pura calcula os fatores e verifica a concordância do score. Empreendimento, tipologia e unidade selecionada não dão pontos. Entrada e objetivo continuam informativos. Não há pesos configuráveis, IA, lead score ou health score. Regras e contrato detalhados em `docs/crm.md`.
+
 # Template
 
 ## ADR-020 — Visitas têm estados finais irreversíveis por PATCH
