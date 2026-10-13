@@ -1,802 +1,111 @@
 # Harpia API
 
-Backend do **Harpia**, uma plataforma vertical de gestão para incorporadoras imobiliárias.
+A NestJS/PostgreSQL backend for tenant-scoped real-estate CRM, reservations, sales, and financial workflows.
 
-O Harpia conecta operação imobiliária, CRM, vendas, investidores, financeiro, documentos, auditoria e relatórios em um único sistema.
+Harpia is a development project. The [Angular client](https://github.com/macielhgustavo/harpia-web) is part of the same system, not a separate backend.
 
-> Objetivo atual de produto: transformar o CRM no principal ponto de entrada comercial do Harpia, com contexto imobiliário, automações e IA assistida.
+## Why this exists
 
----
+Commercial workflows need consistent transitions: an accepted proposal affects a reservation, unit, opportunity, sale, and receivables. Keeping those changes authorized, auditable, and atomic is the core engineering problem.
 
-## Visão do produto
+## What it does
 
-O Harpia foi criado para centralizar processos que normalmente ficam espalhados entre planilhas, WhatsApp, documentos, sistemas financeiros e CRMs genéricos.
+- Authenticates users with JWTs, active-user checks, and session versioning.
+- Applies role-based permissions and organization-scoped data access.
+- Connects people, opportunities, activities, visits, reservations, and proposals.
+- Converts accepted proposals into sales and related financial records.
+- Stores audit events and controls private document access.
+- Includes collections scheduling, bank reconciliation, and financial reports.
 
-Fluxo principal:
+## Architecture
 
-```text
-Pessoa
-→ CRM
-→ Empreendimento
-→ Unidade
-→ Reserva
-→ Proposta
-→ Venda
-→ Recebíveis
-→ Financeiro
+```mermaid
+flowchart TD
+  HTTP["Angular / HTTP clients"] --> G["JWT and permission guards"]
+  G --> C["Controllers and validated DTOs"]
+  C --> S["Domain services"]
+  S --> P["Prisma / PostgreSQL transactions"]
+  S --> D["Private document storage"]
+  P --> A["Audit and financial records"]
 ```
 
-Fluxo de investidores:
+Organization context comes from the authenticated user. The database and service layer remain the enforcement boundary; client-side roles are not authorization.
 
-```text
-Investidor
-→ Investimento
-→ Alocação
-→ Retorno
-```
-
-Estrutura imobiliária:
-
-```text
-Organização
-→ Empresa / SPE
-→ Empreendimento
-→ Tipologia
-→ Unidade
-→ Preço
-```
-
----
-
-## Stack
-
-### Backend
-
-- NestJS
-- TypeScript
-- Prisma 5.22
-- PostgreSQL
-- Passport JWT
-- bcryptjs
-- class-validator
-- class-transformer
-
-### Infraestrutura
-
-- Render
-- PostgreSQL
-- storage local em desenvolvimento
-- storage privado S3-compatible em produção
-
-### Frontend relacionado
-
-O frontend do Harpia está em outro repositório:
-
-```text
-macielhgustavo/harpia-web
-```
-
-Stack principal:
-
-- Angular 18 standalone
-- TypeScript
-- Tailwind CSS
-- RxJS
-- Signals
-- lucide-angular
-
----
-
-## Domínios principais
-
-O backend já possui estrutura para:
-
-### Identidade e acesso
-
-- autenticação;
-- recuperação de senha;
-- alteração de senha;
-- convites;
-- usuários;
-- RBAC;
-- revogação de sessão;
-- auditoria.
-
-### Pessoas
-
-`Person` é a entidade central de pessoas do sistema.
-
-Uma mesma pessoa pode assumir papéis como:
-
-- LEAD
-- CLIENTE
-- CORRETOR
-- FUNCIONARIO
-- FORNECEDOR
-- PARCEIRO
-- INVESTIDOR
-
-O Harpia evita criar cadastros paralelos para a mesma pessoa.
-
-### Empresas e estrutura imobiliária
-
-- empresas;
-- SPEs;
-- empreendimentos;
-- tipologias;
-- unidades;
-- tabelas de preço;
-- preço individual por unidade.
-
-### CRM
-
-- pipelines;
-- etapas;
-- oportunidades;
-- histórico de etapas;
-- atividades;
-- visitas;
-- timeline comercial;
-- filtros;
-- paginação;
-- RBAC;
-- auditoria.
-
-Pipeline padrão:
-
-```text
-Novo
-→ Contato inicial
-→ Qualificado
-→ Visita
-→ Proposta
-→ Negociação
-→ Ganho / Perdido
-```
-
-Uma oportunidade pode começar sem unidade específica.
-
-### Vendas
-
-- reservas;
-- propostas;
-- versionamento de propostas;
-- vendas;
-- cancelamentos;
-- distratos;
-- recebíveis.
-
-### Financeiro
-
-- núcleo financeiro;
-- contas a receber;
-- contas a pagar;
-- fluxo financeiro;
-- conciliação bancária;
-- DRE gerencial;
-- cobranças automáticas;
-- correção monetária.
-
-### Investidores
-
-- investimentos;
-- alocações;
-- retornos;
-- relatórios de posição.
-
-### Documentos
-
-- upload privado;
-- armazenamento local ou S3;
-- acesso autenticado;
-- URLs assinadas;
-- proteção por tenant.
-
-### Notificações
-
-- central de notificações;
-- preferências;
-- suporte a evolução de notificações por canais externos.
-
-### Relatórios
-
-- relatórios financeiros;
-- exportação XLSX;
-- exportação PDF;
-- filtros por período;
-- proteção contra formula injection;
-- auditoria de exportações.
-
----
-
-# CRM
-
-O CRM é uma das principais áreas estratégicas do Harpia.
-
-Ele é isolado por organização e utiliza o usuário autenticado para definir tenant e ator.
-
-Nenhum endpoint deve confiar em `organizationId` vindo do cliente.
-
-## Modelo atual
-
-Principais entidades:
-
-- `SalesPipeline`
-- `SalesStage`
-- `Opportunity`
-- `OpportunityStageHistory`
-- `SalesActivity`
-- `SalesVisit`
-
-### Opportunity
-
-A oportunidade se conecta a:
-
-- pessoa;
-- pipeline;
-- etapa;
-- responsável;
-- empreendimento;
-- unidade opcional.
-
-### Activities
-
-Atividades podem representar:
-
-- ligação;
-- WhatsApp;
-- e-mail;
-- reunião;
-- visita;
-- follow-up;
-- tarefa;
-- outro.
-
-Possuem ciclo explícito de status e podem carregar prioridade, lembrete e resultado.
-
-### Visits
-
-`SalesVisit` representa a visita imobiliária como fluxo próprio.
-
-Pode armazenar:
-
-- oportunidade;
-- pessoa;
-- responsável;
-- empreendimento;
-- unidade;
-- agenda;
-- comparecimento;
-- resultado.
-
-## Regras importantes
-
-- criar oportunidade adiciona o papel `LEAD` de forma idempotente;
-- oportunidade não nasce em etapa terminal;
-- unidade deve pertencer ao empreendimento informado;
-- responsável deve ser usuário ativo da mesma organização;
-- mover para perdido exige motivo;
-- ganho e perda geram auditoria;
-- histórico de etapa é preservado;
-- valores comerciais novos devem usar precisão decimal adequada;
-- listagens são paginadas no servidor.
-
-## Endpoints principais
-
-```text
-GET|POST /crm/pipelines
-
-GET|POST /crm/opportunities
-GET|PATCH|DELETE /crm/opportunities/:id
-POST /crm/opportunities/:id/move
-GET /crm/opportunities/:id/history
-GET /crm/opportunities/:id/timeline
-
-GET|POST /crm/activities
-PATCH|DELETE /crm/activities/:id
-
-GET|POST /crm/visits
-PATCH /crm/visits/:id
-```
-
-Leitura exige permissão equivalente a `CRM_READ`.
-
-Mutações exigem permissão equivalente a `CRM_WRITE`.
-
----
-
-# Direção atual do CRM
-
-A evolução do CRM está organizada em documentação própria.
-
-Prioridades:
-
-1. melhorar experiência do pipeline;
-2. consolidar timeline e produtividade;
-3. melhorar experiência de visitas;
-4. estruturar interesse imobiliário;
-5. criar matching de unidades;
-6. estruturar origens, tags e motivos de perda;
-7. criar lead score, health e próxima melhor ação;
-8. criar dashboard comercial;
-9. criar automações;
-10. adicionar IA assistida;
-11. polir mobile, performance e observabilidade.
-
-## Diferencial esperado
-
-Um CRM genérico pode dizer:
-
-> João está em negociação.
-
-O Harpia deve conseguir dizer:
-
-> João procura apartamento de 2 quartos até R$ 500 mil, visitou determinado empreendimento, recebeu proposta de uma unidade específica e está há dois dias sem interação.
-
-A especialização imobiliária é parte central da estratégia do produto.
-
----
-
-# Documentação interna
-
-Antes de alterar o CRM, agentes e desenvolvedores devem consultar:
-
-```text
-AGENTS.md
-PROGRESS.md
-docs/crm.md
-docs/crm-master-audit.md
-docs/crm/HARPIA_CRM_MASTER.md
-docs/crm/CRM_BACKLOG.md
-docs/crm/CRM_DECISIONS.md
-docs/crm/CRM_UX.md
-```
-
-### Função dos documentos
-
-| Arquivo | Função |
+| Layer | Location |
 | --- | --- |
-| `AGENTS.md` | Regras de trabalho para agentes de código |
-| `PROGRESS.md` | Estado real do projeto |
-| `docs/crm.md` | Documentação técnica do CRM atual |
-| `docs/crm-master-audit.md` | Auditoria técnica histórica do CRM |
-| `HARPIA_CRM_MASTER.md` | Visão futura do CRM |
-| `CRM_BACKLOG.md` | Tarefas e fases |
-| `CRM_DECISIONS.md` | Decisões de produto e arquitetura |
-| `CRM_UX.md` | Direção de experiência do usuário |
+| Identity, session and permissions | `src/auth/` |
+| Commercial workflows | `src/crm/`, `src/reservations/`, `src/proposals/`, `src/sales/` |
+| Financial workflows | `src/receivables/`, `src/collections/`, related finance modules |
+| Schema and migrations | `prisma/` |
+| Real HTTP/database acceptance tests | `test/` |
 
----
+## Tech stack
 
-# Setup local
+TypeScript, NestJS, PostgreSQL, Prisma, Passport/JWT, class-validator, Jest, Supertest, and S3-compatible private storage.
 
-## Pré-requisitos
+## Engineering highlights
 
-- Node.js
-- npm
-- PostgreSQL
+- **Fail-closed permissions:** protected handlers need explicit permission metadata or an authenticated-only declaration.
+- **Session revocation:** JWT validation checks persisted token version and active user state.
+- **Transactional commercial transitions:** reservation and sale paths use tenant-scoped locks, constraints, and audit records.
+- **Database-backed E2E:** the test runner provisions disposable PostgreSQL, applies migrations, and exercises HTTP contracts.
+- **Private documents:** local development storage and private S3-compatible production storage have separate configuration.
 
-## Instalação
+These patterns must be evaluated per workflow; their existence does not establish that every endpoint is free of security defects.
+
+## Getting started
+
+Use Node.js 22 and a local development PostgreSQL database.
 
 ```bash
-npm install
+git clone https://github.com/macielhgustavo/harpia-api.git
+cd harpia-api
+npm ci
+cp .env.example .env
 ```
 
-Crie o arquivo de ambiente com base em:
-
-```text
-.env.example
-```
-
-Depois:
+Set `DATABASE_URL` for a disposable development database and replace the example `JWT_SECRET` with a strong local value. Then:
 
 ```bash
 npx prisma generate
 npx prisma migrate dev
-```
-
-## Rodar em desenvolvimento
-
-```bash
 npm run start:dev
 ```
 
-Outros modos:
+Use a separate database from any hosted deployment. The frontend defaults to a hosted API, so configure its endpoint separately.
+
+## Tests
 
 ```bash
-npm run start
-npm run start:prod
-```
-
----
-
-# Testes
-
-```bash
-npm run test
-npm run test:e2e
-npm run test:cov
-```
-
-## E2E da API
-
-`npm run test:e2e` cria por padrão um PostgreSQL 16 descartável em Docker,
-recria somente o schema `public` desse banco, aplica todas as migrations com
-`prisma migrate deploy`, executa os specs serialmente e remove o container ao
-final. Se o engine não responder, o runner procura automaticamente uma
-instalação nativa de PostgreSQL (`Program Files/PostgreSQL` no Windows ou
-`initdb` no `PATH`) e cria um cluster temporário próprio. Nenhuma `.env.test` é
-necessária.
-
-Também é possível usar uma instalação local de PostgreSQL. Informe o diretório
-que contém `initdb`, `pg_ctl` e `createdb`; o runner criará e removerá um cluster
-temporário próprio:
-
-```powershell
-$env:E2E_POSTGRES_BIN = 'C:\Program Files\PostgreSQL\18\bin'
-npm run test:e2e
-```
-
-Em Linux/macOS, o valor pode ser `/usr/lib/postgresql/16/bin` ou o diretório
-equivalente da instalação. `E2E_POSTGRES_PORT` é opcional.
-
-Para um banco já provisionado, use `E2E_DATABASE_URL`. A proteção do runner
-exige `NODE_ENV=test` nos processos filhos, protocolo PostgreSQL e nome de banco
-contendo `test` ou `e2e`; host remoto exige ainda
-`E2E_ALLOW_REMOTE_DATABASE=true`. A URL idêntica a `PRODUCTION_DATABASE_URL` é
-sempre recusada. O schema `public` do banco E2E informado é recriado, portanto
-essa opção deve apontar exclusivamente para testes.
-
-```bash
-E2E_DATABASE_URL=postgresql://postgres:postgres@127.0.0.1:5432/harpia_e2e npm run test:e2e
-```
-
-`npm run test:e2e:crm` filtra a mesma infraestrutura para os specs comerciais.
-O setup direto cria apenas organização, usuários autenticáveis e catálogo
-imobiliário; pessoa, oportunidade, atividade, visita, reserva, proposta, aceite
-e venda atravessam os contratos HTTP reais e os guards da aplicação.
-
-Antes de considerar um bloco concluído:
-
-```bash
-npx prisma format
-npx prisma generate
+npm test -- --runInBand
 npm run build
-npm test -- --runInBand --forceExit
+npm run test:e2e
 ```
 
-Use apenas os comandos que existirem no `package.json` atual.
+The E2E runner starts disposable PostgreSQL using Docker or a local PostgreSQL installation. If `E2E_DATABASE_URL` is supplied, it must point to a test-only database: the runner resets its `public` schema. It rejects production mode, database names without test/e2e markers, and remote targets unless explicitly enabled.
 
----
+Existing GitHub Actions runs API E2E. Unit/build checks and frontend CI should also gate changes.
 
-# Autenticação
+## Technical decisions
 
-A API usa Bearer JWT.
+- **Relational transactions over independent CRUD writes:** commercial state and audit records move together.
+- **Organization as the tenancy root:** cross-organization access is checked server-side.
+- **Separate frontend repository:** independently buildable client, with contract compatibility to maintain.
+- **Local scheduled collections:** simple single-process scheduling today; not a durable distributed worker.
 
-Novos JWTs possuem `tokenVersion`.
+## Limitations
 
-A estratégia de autenticação valida no banco:
+- The bootstrap currently reflects arbitrary CORS origins with credentials. Restrict origins before exposing an authenticated deployment.
+- Collections scheduling is in-process, not a queue-backed service with distributed leases.
+- Financial legacy paths and migrations need continued review; passing unit tests is not a complete accounting certification.
+- No claim of customer adoption, production scale, or a security audit is made.
 
-- conta;
-- organização;
-- status;
-- versão atual do token.
+## Further reading
 
-Alteração ou recuperação de senha incrementa `tokenVersion` e invalida JWTs anteriores.
+[Current CRM implementation](docs/crm.md), [engineering decisions](docs/crm/CRM_DECISIONS.md), [backlog](docs/crm/CRM_BACKLOG.md), and [progress record](PROGRESS.md).
 
-Tokens antigos sem `tokenVersion` são rejeitados.
+## Roadmap
 
-## Política de senha
-
-Novas senhas devem respeitar a política configurada pelo backend, incluindo:
-
-- comprimento mínimo;
-- maiúscula;
-- minúscula;
-- número;
-- caractere especial;
-- validação contra valores inseguros.
-
-## Conta seed
-
-O ambiente de desenvolvimento pode possuir a conta seed legada:
-
-```text
-admin@harpia.com
-```
-
-A senha correspondente deve ser tratada apenas como credencial de desenvolvimento e alterada quando necessário.
-
-Nunca utilizar credenciais seed em produção.
-
----
-
-# Endpoints de autenticação
-
-| Endpoint | Autenticação | Função |
-| --- | --- | --- |
-| `POST /auth/register` | Público | Cadastro |
-| `POST /auth/login` | Público | Login |
-| `POST /auth/forgot-password` | Público | Solicita recuperação |
-| `POST /auth/reset-password` | Público | Redefine senha |
-| `POST /auth/accept-invitation` | Público | Aceita convite |
-| `POST /auth/change-password` | JWT | Altera senha |
-
-Tokens de recuperação e convite são armazenados como hash.
-
----
-
-# Rate limiting
-
-Endpoints públicos de autenticação possuem throttling próprio.
-
-Os valores são configuráveis por variáveis `AUTH_THROTTLE_*`.
-
-Antes de escalar horizontalmente, o armazenamento em memória do throttler deve ser substituído por armazenamento compartilhado.
-
----
-
-# RBAC
-
-O papel do JWT não é a fonte de autorização.
-
-O backend consulta o estado atual do usuário.
-
-Perfis principais:
-
-| Papel | Perfil |
-| --- | --- |
-| `OWNER` | acesso total |
-| `ADMIN` | acesso administrativo, com restrições sobre OWNER |
-| `FINANCEIRO` | financeiro e relatórios |
-| `COMERCIAL` | CRM, pessoas e vendas |
-| `OPERACIONAL` | empreendimentos, unidades e operação |
-| `LEITURA` | leitura não financeira |
-
-Rotas sem metadata de autorização devem falhar fechadas.
-
----
-
-# Gestão de usuários
-
-Endpoints administrativos:
-
-```text
-GET /users
-GET /users/:id
-PATCH /users/:id/role
-PATCH /users/:id/status
-POST /users/invitations
-GET /users/invitations
-POST /users/invitations/:id/revoke
-```
-
-Regras importantes:
-
-- usuário não pode desativar a própria conta;
-- último OWNER ativo não pode ser removido/demovido;
-- ADMIN não pode gerenciar OWNER como se tivesse a mesma autoridade;
-- respostas nunca expõem hash de senha ou `tokenVersion`.
-
----
-
-# Auditoria
-
-`AuditLog` é append-only e tenant-scoped.
-
-Mutações relevantes e auditoria devem compartilhar a mesma transação sempre que possível.
-
-Exemplos auditados:
-
-- autenticação;
-- usuários;
-- convites;
-- empresas;
-- empreendimentos;
-- unidades;
-- preços;
-- investimentos;
-- retornos;
-- documentos;
-- CRM;
-- vendas;
-- financeiro;
-- exportações.
-
-Endpoints:
-
-```text
-GET /audit-logs
-GET /audit-logs/:id
-```
-
-Não existem endpoints HTTP para alterar ou excluir registros de auditoria.
-
----
-
-# Documentos privados
-
-Documentos nunca devem ser expostos em diretório público.
-
-## Desenvolvimento
-
-```env
-STORAGE_DRIVER=local
-STORAGE_LOCAL_PATH=./uploads
-```
-
-## Produção
-
-Exemplo:
-
-```env
-STORAGE_DRIVER=s3
-S3_ENDPOINT=
-S3_REGION=
-S3_BUCKET=
-S3_ACCESS_KEY_ID=
-S3_SECRET_ACCESS_KEY=
-S3_FORCE_PATH_STYLE=false
-SIGNED_URL_EXPIRATION_SECONDS=300
-```
-
-O bucket deve permanecer privado.
-
----
-
-# Reservas de unidades
-
-Usuários com permissão de leitura de vendas podem consultar reservas.
-
-Usuários com permissão de escrita podem:
-
-- reservar;
-- cancelar;
-- converter.
-
-Endpoints:
-
-```text
-GET /reservations
-GET /reservations/:id
-POST /reservations
-POST /reservations/:id/cancel
-POST /reservations/:id/convert
-```
-
-Regras:
-
-- apenas unidade `DISPONIVEL` pode ser reservada;
-- reserva ativa altera unidade para `RESERVADA`;
-- cancelamento pode devolver a unidade para `DISPONIVEL`;
-- concorrência é protegida por constraints, locks e transação;
-- histórico de reserva impede exclusão inconsistente.
-
----
-
-# Relatórios financeiros
-
-Relatórios são tenant-scoped e gerados em memória.
-
-Formatos:
-
-- XLSX
-- PDF
-
-Exemplos:
-
-```text
-GET /reports/captations
-GET /reports/returns
-GET /reports/overdue-returns
-GET /reports/investor-positions
-```
-
-Filtros devem usar períodos válidos e respeitar limites definidos no backend.
-
----
-
-# Princípios de segurança
-
-O Harpia deve manter como regras permanentes:
-
-- tenant derivado da sessão;
-- backend como autoridade de RBAC;
-- validação de relacionamento entre entidades;
-- transações em fluxos críticos;
-- histórico imutável quando necessário;
-- proteção contra double submit;
-- proteção contra concorrência;
-- logs sanitizados;
-- documentos privados;
-- hashes para tokens sensíveis;
-- ausência de segredos no repositório;
-- cuidado com formula injection em planilhas;
-- precisão monetária adequada.
-
----
-
-# Workflow de desenvolvimento
-
-Antes de trabalhar em uma feature:
-
-```text
-ler documentação
-→ inspecionar código atual
-→ verificar se já existe
-→ implementar
-→ testar
-→ revisar segurança
-→ revisar UX
-→ atualizar documentação
-→ atualizar PROGRESS.md
-→ commit
-→ push
-→ validar produção
-```
-
-Não marcar funcionalidade como concluída se:
-
-- existe apenas no backend;
-- existe apenas no frontend;
-- não foi testada;
-- migration não foi aplicada;
-- produção está quebrada.
-
----
-
-# Deploy
-
-Produção atual:
-
-- API: Render
-- Frontend: Vercel
-
-Migrations de produção devem ser tratadas de forma segura e idempotente.
-
-Evitar alterações destrutivas sem plano de compatibilidade.
-
----
-
-# Roadmap atual
-
-O foco atual está no CRM.
-
-Sequência recomendada:
-
-```text
-auditoria atualizada
-→ CRM UX
-→ timeline e produtividade
-→ visitas
-→ inteligência imobiliária
-→ matching
-→ scoring
-→ dashboard
-→ automações
-→ IA assistida
-→ polimento
-```
-
-A prioridade é melhorar profundamente o fluxo comercial antes de abrir novas grandes frentes do produto.
-
----
-
-# Repositórios
-
-Backend:
-
-```text
-macielhgustavo/harpia-api
-```
-
-Frontend:
-
-```text
-macielhgustavo/harpia-web
-```
-
----
-
-# Licença
-
-Verifique o arquivo `LICENSE` do repositório para a licença atualmente adotada pelo projeto.
+- Enforce explicit deployment CORS configuration.
+- Gate unit tests/build and the full commercial E2E journey in CI.
+- Publish a synthetic-data demo and concise API examples.
