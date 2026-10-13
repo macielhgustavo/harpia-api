@@ -84,7 +84,7 @@ npm run test:e2e
 
 The E2E runner starts disposable PostgreSQL using Docker or a local PostgreSQL installation. If `E2E_DATABASE_URL` is supplied, it must point to a test-only database: the runner resets its `public` schema. It rejects production mode, database names without test/e2e markers, and remote targets unless explicitly enabled.
 
-Existing GitHub Actions runs API E2E. Unit/build checks and frontend CI should also gate changes.
+GitHub Actions gates API unit tests, build, and PostgreSQL-backed E2E. The frontend has its own build and headless unit-test workflow.
 
 ## Technical decisions
 
@@ -107,5 +107,5 @@ Existing GitHub Actions runs API E2E. Unit/build checks and frontend CI should a
 ## Roadmap
 
 - Enforce explicit deployment CORS configuration.
-- Gate unit tests/build and the full commercial E2E journey in CI.
+- Keep the commercial E2E journey as a required regression gate.
 - Publish a synthetic-data demo and concise API examples.
